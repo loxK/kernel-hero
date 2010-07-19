@@ -1715,7 +1715,7 @@ CONFIG_CRYPTO_TWOFISH_COMMON=y
 # Compression
 #
 CONFIG_CRYPTO_DEFLATE=y
-# CONFIG_CRYPTO_LZO is not set
+CONFIG_CRYPTO_LZO=y
 
 #
 # Random Number Generation
