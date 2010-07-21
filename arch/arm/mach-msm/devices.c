@@ -39,6 +39,8 @@
 static char *df_serialno = "000000000000";
 int usb_phy_error;
 
+extern void htc_battery_usb_status_notifier_func(int online);
+
 #define HSUSB_API_INIT_PHY_PROC	2
 #define HSUSB_API_PROG		0x30000064
 #define HSUSB_API_VERS MSM_RPC_VERS(1, 1)
@@ -270,7 +272,7 @@ void msm_hsusb_8x50_phy_reset(void)
 /* adjust eye diagram, disable vbusvalid interrupts */
 static int hsusb_phy_init_seq[] = { 0x1D, 0x0D, 0x1D, 0x10, -1 };
 
-#ifdef CONFIG_USB_FUNCTION
+#ifdef CONFIG_USB_FUNCTION_SELECTED
 static char *usb_functions[] = {
 #if defined(CONFIG_USB_FUNCTION_MASS_STORAGE) || defined(CONFIG_USB_FUNCTION_UMS)
 	"usb_mass_storage",
@@ -355,7 +357,7 @@ static struct msm_hsusb_product usb_products[] = {
 struct msm_hsusb_platform_data msm_hsusb_pdata = {
 	.phy_reset = internal_phy_reset,
 	.phy_init_seq = hsusb_phy_init_seq,
-#ifdef CONFIG_USB_FUNCTION
+#ifdef CONFIG_USB_FUNCTION_SELECTED
 	.vendor_id = 0x0bb4,
 	.product_id = 0x0c02,
 	.version = 0x0100,
@@ -369,7 +371,7 @@ struct msm_hsusb_platform_data msm_hsusb_pdata = {
 #endif
 };
 
-#ifdef CONFIG_USB_FUNCTION
+#ifdef CONFIG_USB_FUNCTION_SELECTED
 static struct usb_mass_storage_platform_data mass_storage_pdata = {
 	.nluns = 1,
 	.buf_size = 16384,
@@ -431,6 +433,11 @@ struct platform_device msm_device_hsusb = {
 	},
 };
 
+static void do_usb_send_connect_notify(struct work_struct *send_usb_wq);
+static struct work_struct usb_connect_notifier_wq;
+
+extern void mass_storage_stub_init(void);
+
 void __init msm_add_usb_devices(void (*phy_reset) (void), void (*phy_shutdown) (void))
 {
 	/* setup */
@@ -445,6 +452,9 @@ void __init msm_add_usb_devices(void (*phy_reset) (void), void (*phy_shutdown) (
 #ifdef CONFIG_USB_ANDROID
 	platform_device_register(&android_usb_device);
 #endif
+	INIT_WORK(&usb_connect_notifier_wq, do_usb_send_connect_notify);
+
+	mass_storage_stub_init();
 }
 
 void __init msm_set_ums_device_id(int id)
@@ -1152,7 +1162,7 @@ static int __init board_serialno_setup(char *serialno)
 		str = df_serialno;
 	else
 		str = serialno;
-#ifdef CONFIG_USB_FUNCTION
+#ifdef CONFIG_USB_FUNCTION_SELECTED
 	msm_hsusb_pdata.serial_number = str;
 #endif
 #ifdef CONFIG_USB_ANDROID
@@ -1239,3 +1249,46 @@ char * board_get_mfg_sleep_gpio_table(void)
 }
 EXPORT_SYMBOL(board_get_mfg_sleep_gpio_table);
 
+static DEFINE_MUTEX(notify_sem);
+static DEFINE_MUTEX(vbus_notify_sem);
+static atomic_t atomic_usb_connected = ATOMIC_INIT(0);
+static struct work_struct usb_connect_notifier_wq;
+static void (*set_vbus_state)(int online);
+
+static void do_usb_send_connect_notify(struct work_struct *send_usb_wq)
+{
+	mutex_lock(&notify_sem);
+
+	htc_battery_usb_status_notifier_func(atomic_read(&atomic_usb_connected));
+
+	mutex_unlock(&notify_sem);
+}
+
+void msm_usb_set_connect_status(int connected)
+{
+	atomic_set(&atomic_usb_connected, connected);
+	schedule_work(&usb_connect_notifier_wq);
+}
+EXPORT_SYMBOL(msm_usb_set_connect_status);
+
+int msm_usb_get_connect_status(void)
+{
+	return atomic_read(&atomic_usb_connected);
+}
+EXPORT_SYMBOL(msm_usb_get_connect_status);
+
+void msm_hsusb_set_vbus_state(int online)
+{
+	mutex_lock(&vbus_notify_sem);
+	if (set_vbus_state)
+		(*set_vbus_state)(online);
+	mutex_unlock(&vbus_notify_sem);
+}
+
+void msm_hsusb_set_vbus_state_notifier(void (*setit)(int online))
+{
+	mutex_lock(&vbus_notify_sem);
+	set_vbus_state = setit;
+	mutex_unlock(&vbus_notify_sem);
+}
+EXPORT_SYMBOL(msm_hsusb_set_vbus_state_notifier);

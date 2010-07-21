@@ -18,32 +18,6 @@
 
 /*-------------------------------------------------------------------------*/
 
-#define xprintk(level, fmt, args...) \
-	printk(level "%s: " fmt , driver_name , ## args)
-
-#ifdef DEBUG
-#undef DEBUG
-#define DEBUG(fmt, args...) \
-	xprintk(KERN_DEBUG , fmt , ## args)
-#else
-#define DEBUG(fmt,args...) \
-	do { } while (0)
-#endif /* DEBUG */
-
-#ifdef VERBOSE
-#define VDEBUG DEBUG
-#else
-#define VDEBUG(fmt,args...) \
-	do { } while (0)
-#endif	/* VERBOSE */
-
-#define ERROR(fmt,args...) \
-	xprintk(KERN_ERR , fmt , ## args)
-#define INFO(fmt,args...) \
-	xprintk(KERN_INFO , fmt , ## args)
-
-/*-------------------------------------------------------------------------*/
-
 
 #define USB_ID               (MSM_USB_BASE + 0x0000)
 #define USB_HWGENERAL        (MSM_USB_BASE + 0x0004)
@@ -234,5 +208,7 @@ struct ept_queue_item {
 
 #define ULPI_DEBUG               0x15
 #define ULPI_FUNC_CTRL_CLR       0x06
+#define ULPI_AMPLITUDE           0x0C
+#define ULPI_CONFIG_REG          0x31
 #define ULPI_SUSPENDM            (1 << 6)
 #endif /* _USB_FUNCTION_MSM_HSUSB_HW_H */

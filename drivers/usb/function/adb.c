@@ -382,6 +382,13 @@ static void adb_unbind(void *_ctxt)
 
 	DBG("%s()\n", __func__);
 
+	if (ctxt->read_req) {
+		usb_ept_free_req(ctxt->out, ctxt->read_req);
+		ctxt->read_req = 0;
+	}
+	while ((req = req_get(ctxt, &ctxt->rx_done))) {
+		usb_ept_free_req(ctxt->out, req);
+	}
 	while ((req = req_get(ctxt, &ctxt->rx_idle))) {
 		usb_ept_free_req(ctxt->out, req);
 	}
@@ -389,14 +396,11 @@ static void adb_unbind(void *_ctxt)
 		usb_ept_free_req(ctxt->in, req);
 	}
 
-	ctxt->online = 0;
-	ctxt->error = 1;
-
-	/* readers may be blocked waiting for us to go online */
-	wake_up(&ctxt->read_wq);
+	misc_deregister(&adb_device);
+	misc_deregister(&adb_enable_device);
 }
 
-static void adb_bind(struct usb_endpoint **ept, void *_ctxt)
+static int adb_bind(struct usb_endpoint **ept, void *_ctxt)
 {
 	struct adb_context *ctxt = _ctxt;
 	struct usb_request *req;
@@ -409,7 +413,7 @@ static void adb_bind(struct usb_endpoint **ept, void *_ctxt)
 
 	for (n = 0; n < RX_REQ_MAX; n++) {
 		req = usb_ept_alloc_req(ctxt->out, 512);
-		if (req == 0) goto fail;
+		if (req == 0) goto out_alloc_fail;
 		req->context = ctxt;
 		req->complete = adb_complete_out;
 		req_put(ctxt, &ctxt->rx_idle, req);
@@ -417,22 +421,33 @@ static void adb_bind(struct usb_endpoint **ept, void *_ctxt)
 
 	for (n = 0; n < TX_REQ_MAX; n++) {
 		req = usb_ept_alloc_req(ctxt->in, 4096);
-		if (req == 0) goto fail;
+		if (req == 0) goto in_alloc_fail;
 		req->context = ctxt;
 		req->complete = adb_complete_in;
 		req_put(ctxt, &ctxt->tx_idle, req);
 	}
 
+	if (misc_register(&adb_device))
+		goto misc_device_fail_1;
+	if (misc_register(&adb_enable_device))
+		goto misc_device_fail_2;
+
 	DBG("%s: allocated %d rx and %d tx requests\n",
 	       __func__, RX_REQ_MAX, TX_REQ_MAX);
+	return 0;
 
-	misc_register(&adb_device);
-	misc_register(&adb_enable_device);
-	return;
-
-fail:
-	printk(KERN_ERR "%s() could not allocate requests\n", __func__);
-	adb_unbind(ctxt);
+misc_device_fail_2:
+	misc_deregister(&adb_device);
+misc_device_fail_1:
+in_alloc_fail:
+	while ((req = req_get(ctxt, &ctxt->tx_idle))) {
+		usb_ept_free_req(ctxt->in, req);
+	}
+out_alloc_fail:
+	while ((req = req_get(ctxt, &ctxt->rx_idle))) {
+		usb_ept_free_req(ctxt->out, req);
+	}
+	return -1;
 }
 
 static void adb_configure(int configured, void *_ctxt)
@@ -491,7 +506,7 @@ static struct usb_function usb_func_adb = {
 	.ifc_index = STRING_ADB,
 };
 
-static int __init adb_init(void)
+void adb_init(void)
 {
 	struct adb_context *ctxt = &_context;
 	DBG("adb_init()\n");
@@ -513,7 +528,5 @@ static int __init adb_init(void)
 	INIT_LIST_HEAD(&ctxt->rx_done);
 	INIT_LIST_HEAD(&ctxt->tx_idle);
 
-	return usb_function_register(&usb_func_adb);
+	usb_function_register(&usb_func_adb);
 }
-
-module_init(adb_init);

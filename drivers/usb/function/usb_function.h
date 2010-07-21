@@ -80,7 +80,7 @@ struct usb_function {
 	**
 	** might be a good place to allocate some usb_request objects
 	*/
-	void (*bind)(struct usb_endpoint **ept, void *context);
+	int (*bind)(struct usb_endpoint **ept, void *context);
 
 	/* unbind() is called when the function is being removed.
 	** it is illegal to call and usb_ept_* hooks at this point
@@ -143,16 +143,16 @@ struct usb_function {
 	struct usb_descriptor_header **cdc_desc;
 };
 
-unsigned return_usb_function_enabled(const char *function);
+extern unsigned return_usb_function_enabled(const char *function);
 
-int usb_function_register(struct usb_function *driver);
+extern int usb_function_register(struct usb_function *driver);
 
-int usb_function_enable(const char *function, int enable);
-int usb_function_switch(unsigned func_switch);
-int usb_check_mfg_recovery_mode(void);
+extern int usb_function_enable(const char *function, int enable);
+extern int usb_function_switch(unsigned func_switch);
+extern int usb_check_mfg_recovery_mode(void);
 
-struct usb_fi_ept *get_ept_info(const char *function);
-struct usb_interface_descriptor *get_ifc_desc(const char *function);
+extern struct usb_fi_ept *get_ept_info(const char *function);
+extern struct usb_interface_descriptor *get_ifc_desc(const char *function);
 
 /* Allocate a USB request.
 ** Must be called from a context that can sleep.
@@ -160,19 +160,19 @@ struct usb_interface_descriptor *get_ifc_desc(const char *function);
 ** you and free'd when the request is free'd.  Otherwise
 ** it is your responsibility to provide.
 */
-struct usb_request *usb_ept_alloc_req(struct usb_endpoint *ept, unsigned bufsize);
-void usb_ept_free_req(struct usb_endpoint *ept, struct usb_request *req);
+extern struct usb_request *usb_ept_alloc_req(struct usb_endpoint *ept, unsigned bufsize);
+extern void usb_ept_free_req(struct usb_endpoint *ept, struct usb_request *req);
 
 /* safely callable from any context
 ** returns 0 if successfully queued and sets req->status = -EBUSY
 ** req->status will change to a different value upon completion
 ** (0 for success, -EIO, -ENODEV, etc for error)
 */
-int usb_ept_queue_xfer(struct usb_endpoint *ept, struct usb_request *req);
-int usb_ept_flush(struct usb_endpoint *ept);
-int usb_ept_get_max_packet(struct usb_endpoint *ept);
-void usb_free_endpoint_all_req(struct usb_endpoint *ep);
-int usb_find_interface_number(const char *name);
-int usb_ept_cancel_xfer(struct usb_endpoint *ept, struct usb_request *_req);
-int usb_get_connect_type(void);
+extern int usb_ept_queue_xfer(struct usb_endpoint *ept, struct usb_request *req);
+extern int usb_ept_flush(struct usb_endpoint *ept);
+extern int usb_ept_get_max_packet(struct usb_endpoint *ept);
+extern void usb_free_endpoint_all_req(struct usb_endpoint *ep);
+extern int usb_find_interface_number(const char *name);
+extern int usb_ept_cancel_xfer(struct usb_endpoint *ept, struct usb_request *_req);
+extern int usb_get_connect_type(void);
 #endif

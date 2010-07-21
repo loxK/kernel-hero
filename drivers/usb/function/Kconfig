@@ -1,12 +1,15 @@
-menu "USB Function Support"
-
-config USB_FUNCTION
-	boolean "Support for USB Function Drivers"
+menuconfig USB_FUNCTION
+	tristate "Support for USB Function Drivers"
 	help
 	   The USB Function framework is similar to the Gadget framework
 	   but a little simpler and a little more plugable.  It trades
 	   some flexibility in the framework for smaller and simpler
 	   function drivers that can be combined into a composite driver.
+
+if USB_FUNCTION
+
+config  USB_FUNCTION_SELECTED
+	boolean
 
 choice
 	prompt "USB Peripheral Controller"
@@ -14,7 +17,14 @@ choice
 	
 config USB_FUNCTION_MSM_HSUSB
 	boolean "MSM7K Highspeed USB Peripheral Controller"
+	select USB_FUNCTION_SELECTED
 	depends on ARCH_MSM
+
+config USB_MSM_HSUSB
+	tristate
+	depends on USB_FUNCTION_MSM_HSUSB
+	default USB_FUNCTION
+	select USB_FUNCTION_SELECTED
 
 endchoice
 
@@ -49,10 +59,6 @@ config USB_FUNCTION_DIAG
 config USB_FUNCTION_ETHER
 	boolean "USB Ethernet Function"
 	depends on USB_FUNCTION
-config USB_FUNCTION_RNDIS
-        boolean "USB RNDIS support"
-        depends on USB_FUNCTION_ETHER
-        default y
 
 config USB_FUNCTION_FSYNC
 	boolean "USB MSM7K FSYNC Function"
@@ -80,4 +86,4 @@ config USB_FUNCTION_CAT_KIT
 	depends on USB_FUNCTION
 	default n
 
-endmenu
+endif # USB_FUNCTION

@@ -46,7 +46,9 @@
 
 static char		manufacturer [10] = "HTC";
 
+static struct net_device *the_dev;
 static int enabled = 0;
+static int cleanup = 0;
 
 #define STATUS_INTERVAL_MSEC 9 /* 2^8*125us = 32ms */
 
@@ -190,7 +192,7 @@ static void ether_in_complete(struct usb_endpoint *ept,
 			      struct usb_request *req);
 static void ether_out_complete(struct usb_endpoint *ept,
 			       struct usb_request *req);
-static void eth_bind(struct usb_endpoint **ept,
+static int eth_bind(struct usb_endpoint **ept,
 				void *_ctxt);
 static void eth_unbind(void *_ctxt);
 
@@ -321,27 +323,23 @@ static void eth_unbind(void *_ctxt)
 	
 	while ((req = req_get(ctxt, &ctxt->tx_intr_reqs))) {
 		usb_ept_free_req(ctxt->intr_in, req);
-    }
+	}
 	while ((req = req_get(ctxt, &ctxt->rx_cmd_reqs))) {
 		usb_ept_free_req(ctxt->ep0out, req);
 	}
 	while ((req = req_get(ctxt, &ctxt->rx_reqs))) {
 		usb_ept_free_req(ctxt->out, req);
-    }
+	}
 	while ((req = req_get(ctxt, &ctxt->tx_reqs))) {
 		usb_ept_free_req(ctxt->in, req);
 	}
-	if (ctxt->registered == 1) {
-		device_remove_file(&ctxt->dev->dev, &dev_attr_enable);
-		ctxt->registered = 0;
-	}
+
+	device_remove_file(&ctxt->dev->dev, &dev_attr_enable);
 	rndis_deregister (ctxt->rndis_config);
-	//rndis_exit ();
-	//unregister_netdev (ctxt->dev);
-	//free_netdev(ctxt->dev);
+	rndis_exit();
 }
 
-static void eth_bind(struct usb_endpoint **ept, void *_ctxt)
+static int eth_bind(struct usb_endpoint **ept, void *_ctxt)
 {
 	struct ether_context *ctxt = _ctxt;
 	struct usb_request *req;
@@ -365,6 +363,7 @@ static void eth_bind(struct usb_endpoint **ept, void *_ctxt)
 	for (n = 0; n < MAX_INTR_TX; n++) {
 		req = usb_ept_alloc_req(ctxt->intr_in, 8);
 		if (!req)
+			goto tx_intr_reqs_fail;
 			break;
 		req->complete = rndis_control_ack_complete;
 		spin_lock_irqsave(&ctxt->lock, flags);
@@ -375,7 +374,7 @@ static void eth_bind(struct usb_endpoint **ept, void *_ctxt)
 	for (n = 0; n < MAX_EP0_RX; n++) {
 		req = usb_ept_alloc_req(ctxt->ep0out, 4096);
 		if (!req)
-			break;
+			goto rx_cmd_reqs_fail;
 		req->complete = receive_rndis_command;
 		spin_lock_irqsave(&ctxt->lock, flags);
 		list_add_tail(&req->list, &ctxt->rx_cmd_reqs);
@@ -385,7 +384,7 @@ static void eth_bind(struct usb_endpoint **ept, void *_ctxt)
 	for (n = 0; n < MAX_RX; n++) {
 		req = usb_ept_alloc_req(ctxt->out, 0);
 		if (!req)
-			break;
+			goto rx_reqs_fail;
 		req->complete = ether_out_complete;
 		spin_lock_irqsave(&ctxt->lock, flags);
 		list_add_tail(&req->list, &ctxt->rx_reqs);
@@ -394,7 +393,7 @@ static void eth_bind(struct usb_endpoint **ept, void *_ctxt)
 	for (n = 0; n < MAX_TX; n++) {
 		req = usb_ept_alloc_req(ctxt->in, 0);
 		if (!req)
-			break;
+			goto tx_reqs_fail;
 		req->complete = ether_in_complete;
 		spin_lock_irqsave(&ctxt->lock, flags);
 		list_add_tail(&req->list, &ctxt->tx_reqs);
@@ -403,13 +402,13 @@ static void eth_bind(struct usb_endpoint **ept, void *_ctxt)
 
 	ifc_desc= get_ifc_desc("ether");
 	if (!ifc_desc)
-		goto fail;
+		goto get_ifc_desc_fail;
 	control_intf.bInterfaceNumber = ifc_desc[0].bInterfaceNumber;
 	data_intf.bInterfaceNumber = ifc_desc[1].bInterfaceNumber;
 	
 	ept_info = get_ept_info("ether");
 	if (!ept_info)
-		goto fail;
+		goto get_ept_info_fail;
 	
 	status_desc.bEndpointAddress = ept_info[0].desc.bEndpointAddress;
 	sink_desc.bEndpointAddress = ept_info[1].desc.bEndpointAddress;
@@ -422,14 +421,14 @@ static void eth_bind(struct usb_endpoint **ept, void *_ctxt)
 	status = device_create_file(&ctxt->dev->dev, &dev_attr_enable);
 	if (status != 0) {
 		printk(KERN_ERR "ether device_create_file failed: %d\n", status);
-        goto fail;
+		goto device_create_file_fail;
 	}
 	ctxt->registered = 1;
 	ctxt->online = 0;
 	status = rndis_init();
 	if (status < 0) {
 		printk(KERN_ERR "can't init RNDIS, %d\n", status);
-		goto fail;
+		goto rndis_init_fail;
 	}
 
 	netif_stop_queue (ctxt->dev);
@@ -438,26 +437,49 @@ static void eth_bind(struct usb_endpoint **ept, void *_ctxt)
 	ctxt->rndis_config = rndis_register (rndis_control_ack);
 	if (ctxt->rndis_config < 0) {
 		printk(KERN_ERR "ether bind: rndis_register fial, %d\n", ctxt->rndis_config);
-		//unregister_netdev (ctxt->dev);
-		goto fail;
+		goto rndis_register_fail;
 	}
 
 	rndis_set_host_mac (ctxt->rndis_config, ctxt->host_mac);
 	if (rndis_set_param_dev (ctxt->rndis_config, ctxt->dev,
 					 &ctxt->stats, &ctxt->cdc_filter))
-		goto fail;
+		goto rndis_set_fail;
 	if (rndis_set_param_vendor(ctxt->rndis_config, vendorID,
 					manufacturer))
-		goto fail;
+		goto rndis_set_fail;
 	if (rndis_set_param_medium(ctxt->rndis_config,
 					NDIS_MEDIUM_802_3, 0))
-		goto fail;
+		goto rndis_set_fail;
 	
-	return;
+	return 0;
 
-fail:
-	eth_unbind (ctxt);
-	return;
+rndis_set_fail:
+	rndis_deregister(ctxt->rndis_config);
+rndis_register_fail:
+	rndis_exit();
+rndis_init_fail:
+	device_remove_file(&ctxt->dev->dev, &dev_attr_enable);
+device_create_file_fail:
+get_ept_info_fail:
+get_ifc_desc_fail:
+tx_reqs_fail:
+	while ((req = req_get(ctxt, &ctxt->tx_reqs))) {
+		usb_ept_free_req(ctxt->in, req);
+	}
+rx_reqs_fail:
+	while ((req = req_get(ctxt, &ctxt->rx_reqs))) {
+		usb_ept_free_req(ctxt->out, req);
+	}
+rx_cmd_reqs_fail:
+	while ((req = req_get(ctxt, &ctxt->rx_cmd_reqs))) {
+		usb_ept_free_req(ctxt->ep0out, req);
+	}
+tx_intr_reqs_fail:
+	while ((req = req_get(ctxt, &ctxt->tx_intr_reqs))) {
+		usb_ept_free_req(ctxt->intr_in, req);
+	}
+	printk(KERN_ERR "ether_bind() failed\n");
+	return -1;
 }
 
 static void ether_in_complete(struct usb_endpoint *ept,
@@ -792,7 +814,7 @@ static struct net_device_stats *usb_ether_get_stats(struct net_device *dev)
 	return &ctxt->stats;
 }
 
-static void __init usb_ether_setup(struct net_device *dev)
+static void usb_ether_setup(struct net_device *dev)
 {
 	struct ether_context *ctxt = netdev_priv(dev);
 
@@ -815,35 +837,43 @@ static void __init usb_ether_setup(struct net_device *dev)
 	random_ether_addr(ctxt->host_mac);
 }
 
-static int __init ether_init(void)
+int ether_init(void)
 {
 	struct net_device *dev;
 	struct ether_context *ctxt;
-	int ret;
+	int ret = 0;
 
 	dev = alloc_netdev(sizeof(struct ether_context),
 			   "usb%d", usb_ether_setup);
 	if (!dev)
-		return -ENOMEM;
+		goto alloc_netdev_fail;
+	the_dev = dev;
 
 	ret = register_netdev(dev);
 	if (ret)
-		goto err_register_netdev;
+		goto register_netdev_fail;
 	
 	ctxt = netdev_priv(dev);
 	usb_func_ether.context = ctxt;
 	ret = usb_function_register(&usb_func_ether);
 	if (ret < 0)
-		goto err_register_function;
-	return ret;
+		goto usb_function_register_fail;
+	cleanup = 1;
+	return 0;
 	
-err_register_function:
+usb_function_register_fail:
 	unregister_netdev(dev);
-err_register_netdev:
+register_netdev_fail:
 	free_netdev(dev);
-
+alloc_netdev_fail:
 	return ret;
 
 }
 
-module_init(ether_init);
+void ether_exit(void)
+{
+	if (cleanup) {
+		unregister_netdev(the_dev);
+		free_netdev(the_dev);
+	}
+}

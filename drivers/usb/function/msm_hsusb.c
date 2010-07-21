@@ -250,6 +250,9 @@ struct usb_info {
 	void (*config_usb_id_gpios)(bool output_enable);
 	bool enable_car_kit_detect;
 #endif
+
+	struct dentry *dent;
+	int usb_do_work_active;
 };
 
 struct usb_device_descriptor desc_device = {
@@ -1166,54 +1169,6 @@ static void flush_all_endpoints(struct usb_info *ui)
 		flush_endpoint_sw(ui->ept + n);
 }
 
-/* add usb_connected notify behavior ===== */
-static DEFINE_MUTEX(notify_sem);
-/* 0: None, 1: USB host or unknown charger, 2: China AC */
-static atomic_t connect_type = ATOMIC_INIT(0);
-static atomic_t atomic_usb_connected = ATOMIC_INIT(0);
-static struct work_struct usb_connect_notifier_wq;
-
-static void send_usb_connect_notify(struct work_struct *send_usb_wq)
-{
-	static struct t_usb_status_notifier *notifier = NULL;
-
-	mutex_lock(&notify_sem);
-	list_for_each_entry(notifier,
-		&g_lh_usb_notifier_list,
-		notifier_link) {
-			if (notifier->func != NULL) {
-				/* Notify other drivers about connect type. */
-				notifier->func(atomic_read(&connect_type));
-			}
-		}
-	mutex_unlock(&notify_sem);
-}
-
-int usb_register_notifier(struct t_usb_status_notifier *notifier)
-{
-	if (!notifier || !notifier->name || !notifier->func)
-		return -EINVAL;
-
-	mutex_lock(&notify_sem);
-	list_add(&notifier->notifier_link,
-		&g_lh_usb_notifier_list);
-	mutex_unlock(&notify_sem);
-	return 0;
-}
-
-#ifdef MSM_HSUSB_SHOW_USB_NOTIFIER_MESSAGE
-static void usb_notify_connected(int connected)
-{
-	printk(KERN_DEBUG "\n\n%s() RUN(%d)...............\n\n\n", __func__, connected);
-}
-
-static struct t_usb_status_notifier usb_notifier = {
-	.name = "usb_connected",
-	.func = usb_notify_connected,
-};
-#endif /* MSM_HSUSB_SHOW_USB_NOTIFIER_MESSAGE */
-/* END: add usb_connected notify behavior ===== */
-
 static irqreturn_t usb_interrupt(int irq, void *data)
 {
 	struct usb_info *ui = data;
@@ -1262,11 +1217,8 @@ static irqreturn_t usb_interrupt(int irq, void *data)
 			 */
 			set_configuration(ui);
 		}
-		if (atomic_read(&atomic_usb_connected) == 0) {
-			atomic_set(&atomic_usb_connected, 1);
-			atomic_set(&connect_type, 1);
-			schedule_work(&usb_connect_notifier_wq);
-		}
+		if (msm_usb_get_connect_status() == 0)
+			msm_usb_set_connect_status(1);
 	}
 
 	if (n & STS_SLI)
@@ -1293,6 +1245,7 @@ static void msm_hsusb_request_reset(struct usb_info *reset_ui)
 	unsigned long flags;
 	spin_lock_irqsave(&reset_ui->lock, flags);
 	reset_ui->flags |= USB_FLAG_RESET;
+	reset_ui->usb_do_work_active = 1;
 	schedule_work(&reset_ui->work);
 	spin_unlock_irqrestore(&reset_ui->lock, flags);
 }
@@ -1301,7 +1254,7 @@ static ssize_t show_usb_cable_connect(struct device *dev, struct device_attribut
 		char *buf)
 {
 	unsigned length;
-	length = sprintf(buf, "%d\n", atomic_read(&atomic_usb_connected));
+	length = sprintf(buf, "%d\n", msm_usb_get_connect_status());
 	return length;
 }
 
@@ -1583,7 +1536,7 @@ static DEVICE_ATTR(usb_mfg_carkit_enable, 0644, show_mfg_carkit_enable, store_mf
 
 #endif
 
-static void usb_prepare(struct usb_info *ui)
+static int usb_prepare(struct usb_info *ui)
 {
 	int ret = -1;
 
@@ -1603,55 +1556,71 @@ static void usb_prepare(struct usb_info *ui)
 	ui->ep0out.max_pkt = 64;
 
 	ui->setup_req = usb_ept_alloc_req(&ui->ep0in, SETUP_BUF_SIZE);
+	if (ui->setup_req == NULL)
+		goto setup_req_fail;
 
 	INIT_WORK(&ui->work, usb_do_work);
-
-#ifdef MSM_HSUSB_SHOW_USB_NOTIFIER_MESSAGE
-	usb_register_notifier(&usb_notifier);
-#endif
-	INIT_WORK(&usb_connect_notifier_wq, send_usb_connect_notify);
 
 	ret = device_create_file(&ui->pdev->dev,
 		&dev_attr_usb_cable_connect);
 	if (ret != 0) {
-		printk(KERN_WARNING "dev_attr_usb_cable_connect failed\n");
+		goto create_cable_connect_fail;
 	}
 
 	ret = device_create_file(&ui->pdev->dev,
 		&dev_attr_usb_serial_number);
 	if (ret != 0) {
-		printk(KERN_WARNING "dev_attr_usb_serial_number failed\n");
+		goto create_usb_serial_number_fail;
 	}
 
 	ret = device_create_file(&ui->pdev->dev,
 		&dev_attr_dummy_usb_serial_number);
 	if (ret != 0) {
-		printk(KERN_WARNING "dev_attr_dummy_usb_serial_number failed\n");
+		goto create_dummy_usb_serial_number_fail;
 	}
 
 	ret = device_create_file(&ui->pdev->dev,
 		&dev_attr_usb_function_switch);
 	if (ret != 0) {
-		printk(KERN_WARNING "dev_attr_usb_function_switch failed\n");
+		goto create_usb_function_switch_fail;
 	}
 
 	ret = device_create_file(&ui->pdev->dev,
 		&dev_attr_USB_ID_status);
 	if (ret != 0) {
-		printk(KERN_WARNING "dev_attr_USB_ID_status failed\n");
+		goto create_usb_id_status_fail;
 	}
 	ret = device_create_file(&ui->pdev->dev,
 		&dev_attr_usb_phy_setting);
 	if (ret != 0)
-		printk(KERN_WARNING "dev_attr_usb_phy_setting failed\n");
+		goto create_phy_setting_fail;
 
 #if defined(CONFIG_USB_FUNCTION_CAT_KIT)
 	ret = device_create_file(&ui->pdev->dev,
 		&dev_attr_usb_mfg_carkit_enable);
 	if (ret != 0)
-		printk(KERN_WARNING "dev_attr_usb_mfg_carkit_enable failed\n");
+		goto create_carkit_enable_fail;
 #endif
+	return 0;
 
+#if defined(CONFIG_USB_FUNCTION_CAT_KIT)
+create_carkit_enable_fail:
+	device_remove_file(&ui->pdev->dev, &dev_attr_usb_phy_setting);
+#endif
+create_phy_setting_fail:
+	device_remove_file(&ui->pdev->dev, &dev_attr_USB_ID_status);
+create_usb_id_status_fail:
+	device_remove_file(&ui->pdev->dev, &dev_attr_usb_function_switch);
+create_usb_function_switch_fail:
+	device_remove_file(&ui->pdev->dev, &dev_attr_dummy_usb_serial_number);
+create_dummy_usb_serial_number_fail:
+	device_remove_file(&ui->pdev->dev, &dev_attr_usb_serial_number);
+create_usb_serial_number_fail:
+	device_remove_file(&ui->pdev->dev, &dev_attr_usb_cable_connect);
+create_cable_connect_fail:
+	kfree(ui->setup_req);
+setup_req_fail:
+	return -1;
 }
 
 static void usb_suspend_phy(struct usb_info *ui)
@@ -1688,7 +1657,7 @@ static void usb_suspend_phy(struct usb_info *ui)
 #endif
 }
 
-static void usb_bind_driver(struct usb_info *ui, struct usb_function_info *fi)
+static int usb_bind_driver(struct usb_info *ui, struct usb_function_info *fi)
 {
 	struct usb_endpoint *ept;
 	struct usb_endpoint_descriptor *ed;
@@ -1699,12 +1668,12 @@ static void usb_bind_driver(struct usb_info *ui, struct usb_function_info *fi)
 	printk(KERN_DEBUG "usb_bind_func() '%s'\n", func->name);
 
 	if (func->ifc_num > 2)
-		return;
+		return -1;
 
 	count = func->ifc_ept_count;
 
 	if (count > 8)
-		return;
+		return -1;
 
 	fi->ifc[0].bLength = USB_DT_INTERFACE_SIZE;
 	fi->ifc[0].bDescriptorType = USB_DT_INTERFACE;
@@ -1732,7 +1701,7 @@ static void usb_bind_driver(struct usb_info *ui, struct usb_function_info *fi)
 			printk(KERN_WARNING
 			       "failed to allocated endpoint %d\n", n);
 			free_endpoints(ui, fi);
-			return;
+			return -1;
 		}
 		ed = &(fi->ept[n].desc);
 
@@ -1760,7 +1729,26 @@ static void usb_bind_driver(struct usb_info *ui, struct usb_function_info *fi)
 	}
 	fi->endpoints = count;
 
-	func->bind(elist, func->context);
+	printk(KERN_DEBUG "Attempting to bind function driver %s\n", func->name);
+	if (func->bind(elist, func->context)) {
+		printk(KERN_WARNING
+		       "Failed to bind function driver %s\n", func->name);
+		free_endpoints(ui, fi);
+		fi->endpoints = 0;
+		if (func->cdc_desc)
+			ui->next_ifc_num--;
+		return -1;
+	}
+
+	printk(KERN_DEBUG "Successfully bound function driver %s\n", func->name);
+	return 0;
+}
+
+static void usb_unbind_driver(struct usb_info *ui, struct usb_function_info *fi)
+{
+	printk(KERN_DEBUG "Unbinding function driver %s\n", fi->func->name);
+	fi->func->unbind(fi->func->context);
+	free_endpoints(ui, fi);
 }
 
 static void usb_reset(struct usb_info *ui)
@@ -1838,12 +1826,15 @@ static void usb_start(struct usb_info *ui)
 	unsigned count = 0;
 	int i;
 
+printk(KERN_DEBUG "AA %i\n", ui->num_funcs); // adq
+
 	for (i = 0; i < ui->num_funcs; i++) {
 		struct usb_function_info *fi = ui->func[i];
-		usb_bind_driver(ui, fi);
 		if (fi->endpoints)
 			count++;
 	}
+
+printk(KERN_DEBUG "BB %i\n", count); // adq
 
 	if (count == 0) {
 		printk(KERN_DEBUG
@@ -1853,6 +1844,7 @@ static void usb_start(struct usb_info *ui)
 
 	spin_lock_irqsave(&ui->lock, flags);
 	ui->flags |= USB_FLAG_START;
+	ui->usb_do_work_active = 1;
 	schedule_work(&ui->work);
 	spin_unlock_irqrestore(&ui->lock, flags);
 }
@@ -1893,7 +1885,8 @@ struct usb_interface_descriptor *get_ifc_desc(const char *function)
 		return NULL;
 	return &fi->ifc[0];
 }
-static void usb_try_to_bind(void)
+
+static void usb_try_to_start(void)
 {
 	struct usb_info *ui = the_usb_info;
 	struct msm_hsusb_platform_data *pdata;
@@ -1917,13 +1910,14 @@ static void usb_try_to_bind(void)
 
 	/* we have found all the needed functions */
 	ui->bound = 1;
-	printk(KERN_DEBUG "%s: functions bound. starting.\n", __func__);
+	printk(KERN_DEBUG "%s: functions found. starting.\n", __func__);
 	usb_start(ui);
 }
 
 int usb_function_register(struct usb_function *driver)
 {
 	struct usb_function_info *fi;
+	struct usb_info *ui = the_usb_info;
 	unsigned n;
 	int ret = 0;
 
@@ -1941,7 +1935,15 @@ int usb_function_register(struct usb_function *driver)
 	fi->enabled = !driver->disabled;
 	list_add(&fi->list, &usb_function_list);
 
-	usb_try_to_bind();
+	if (usb_bind_driver(ui, fi)) {
+		printk(KERN_ERR "Failed to bind USB function driver %s\n", driver->name);
+		list_del(&fi->list);
+		kfree(fi);
+		ret = -1;
+		goto fail;
+	}
+	mutex_unlock(&usb_function_list_lock);
+	return 0;
 
 fail:
 	mutex_unlock(&usb_function_list_lock);
@@ -1967,26 +1969,6 @@ int usb_function_enable(const char *function, int enable)
 		}
 	}
 	return fi?fi->enabled:0;
-}
-
-static int usb_free(struct usb_info *ui, int ret)
-{
-	if (ui->irq)
-		free_irq(ui->irq, 0);
-	if (ui->pool)
-		dma_pool_destroy(ui->pool);
-	if (ui->dma)
-		dma_free_coherent(&ui->pdev->dev, 4096, ui->buf, ui->dma);
-	if (ui->addr)
-		iounmap(ui->addr);
-	if (ui->clk)
-		clk_put(ui->clk);
-	if (ui->pclk)
-		clk_put(ui->pclk);
-	if (ui->ebi1clk)
-		clk_put(ui->ebi1clk);
-	kfree(ui);
-	return ret;
 }
 
 static void usb_do_work_check_vbus(struct usb_info *ui)
@@ -2213,12 +2195,10 @@ static void usb_do_work(struct work_struct *w)
 				msleep(10);
 				if (_vbus && (readl(USB_PORTSC) & PORTSC_LS) != PORTSC_LS) {
 					printk(KERN_INFO "usb: not AC charger\n");
-					atomic_set(&connect_type, 1);
-					schedule_work(&usb_connect_notifier_wq);
+					msm_usb_set_connect_status(1);
 				} else if (_vbus) {
 					printk(KERN_INFO "usb: AC charger\n");
-					atomic_set(&connect_type, 2);
-					schedule_work(&usb_connect_notifier_wq);
+					msm_usb_set_connect_status(2);
 					writel(0x00080000, USB_USBCMD);
 					msleep(500);
 					usb_lpm_enter(ui);
@@ -2238,11 +2218,8 @@ static void usb_do_work(struct work_struct *w)
 				/* prevent irq context stuff from doing anything */
 				spin_lock_irqsave(&ui->lock, iflags);
 
-				atomic_set(&atomic_usb_connected, 0);
-				if (atomic_read(&connect_type) != 0) {
-					atomic_set(&connect_type, 0);
-					schedule_work(&usb_connect_notifier_wq);
-				}
+				if (msm_usb_get_connect_status() == 1)
+					msm_usb_set_connect_status(0);
 
 				ui->running = 0;
 				ui->online = 0;
@@ -2282,7 +2259,7 @@ static void usb_do_work(struct work_struct *w)
 			}
 			if (flags & USB_FLAG_RESET) {
 				pr_info("hsusb: ONLINE -> RESET\n");
-				if (atomic_read(&connect_type) == 2) {
+				if (msm_usb_get_connect_status() == 2) {
 					pr_info("hsusb: RESET -> ONLINE\n");
 					break;
 				}
@@ -2315,15 +2292,13 @@ static void usb_do_work(struct work_struct *w)
 				msleep(10);
 				if ((readl(USB_PORTSC) & PORTSC_LS) != PORTSC_LS) {
 					printk(KERN_INFO "usb: not AC charger\n");
-					if (atomic_read(&connect_type) != 1) {
-						atomic_set(&connect_type, 1);
-						schedule_work(&usb_connect_notifier_wq);
+					if (msm_usb_get_connect_status() != 1) {
+	                                        msm_usb_set_connect_status(2);					                                        
 					}
 				} else {
 					printk(KERN_INFO "usb: AC charger\n");
-					if (atomic_read(&connect_type) != 2) {
-						atomic_set(&connect_type, 2);
-						schedule_work(&usb_connect_notifier_wq);
+					if (msm_usb_get_connect_status() != 2) {
+	                                        msm_usb_set_connect_status(2);					                                        
 					}
 					writel(0x00080000, USB_USBCMD);
 					msleep(500);
@@ -2336,6 +2311,8 @@ static void usb_do_work(struct work_struct *w)
 			break;
 		}
 	}
+
+	ui->usb_do_work_active = 0;
 }
 
 void msm_hsusb_set_vbus_state(int online)
@@ -2349,6 +2326,7 @@ void msm_hsusb_set_vbus_state(int online)
 	if (vbus != online) {
 		vbus = online;
 		if (ui) {
+			ui->usb_do_work_active = 1;
 			if (online)
 				ui->flags |= USB_FLAG_VBUS_ONLINE;
 			else
@@ -2357,6 +2335,7 @@ void msm_hsusb_set_vbus_state(int online)
 			if (ui->usb_uart_switch)
 				ui->usb_uart_switch(ui->flags & USB_FLAG_VBUS_OFFLINE); /* low for usb */
 
+			ui->usb_do_work_active = 1;
 			schedule_work(&ui->work);
 		}
 	}
@@ -2442,6 +2421,7 @@ static ssize_t debug_write_reset(struct file *file, const char __user *buf,
 
 	spin_lock_irqsave(&ui->lock, flags);
 	ui->flags |= USB_FLAG_RESET;
+	ui->usb_do_work_active = 1;
 	schedule_work(&ui->work);
 	spin_unlock_irqrestore(&ui->lock, flags);
 
@@ -2478,17 +2458,26 @@ const struct file_operations debug_cycle_ops = {
 
 static void usb_debugfs_init(struct usb_info *ui)
 {
-	struct dentry *dent;
-	dent = debugfs_create_dir("usb", 0);
-	if (IS_ERR(dent))
+	ui->dent = debugfs_create_dir("usb", 0);
+	if (IS_ERR(ui->dent)) {
+		ui->dent = NULL;
 		return;
+	}
 
-	debugfs_create_file("status", 0444, dent, ui, &debug_stat_ops);
-	debugfs_create_file("reset", 0222, dent, ui, &debug_reset_ops);
-	debugfs_create_file("cycle", 0222, dent, ui, &debug_cycle_ops);
+	debugfs_create_file("status", 0444, ui->dent, ui, &debug_stat_ops);
+	debugfs_create_file("reset", 0222, ui->dent, ui, &debug_reset_ops);
+	debugfs_create_file("cycle", 0222, ui->dent, ui, &debug_cycle_ops);
 }
+
+static void usb_debugfs_shutdown(struct usb_info *ui)
+{
+	if (ui->dent)
+		debugfs_remove_recursive(ui->dent);
+}
+
 #else
 static void usb_debugfs_init(struct usb_info *ui) {}
+static void usb_debugfs_shutdown(struct usb_info *ui) {}
 #endif
 
 int usb_check_mfg_recovery_mode()
@@ -2603,19 +2592,78 @@ err_request_detect_gpio:
 }
 #endif
 
+static int usb_remove(struct platform_device *pdev)
+{
+	struct usb_info *ui = platform_get_drvdata(pdev);
+	struct list_head *entry;
+	struct list_head *temp;
+        struct msm_hsusb_platform_data *pdata = ui->pdev->dev.platform_data;
+
+	/* remove any external triggers */
+	usb_debugfs_shutdown(ui);
+	device_remove_file(&ui->pdev->dev, &dev_attr_usb_cable_connect);
+	device_remove_file(&ui->pdev->dev, &dev_attr_usb_serial_number);
+	device_remove_file(&ui->pdev->dev, &dev_attr_dummy_usb_serial_number);
+	device_remove_file(&ui->pdev->dev, &dev_attr_usb_function_switch);
+	msm_hsusb_set_vbus_state_notifier(NULL);
+#ifdef CONFIG_USB_FUNCTION_CAT_KIT
+	switch_dev_register(&dock_switch);
+#endif
+
+	/* mark us as offline and wait for worker task to stop */
+	msm_hsusb_set_vbus_state(0);
+	while(ui->usb_do_work_active || ui->flags)
+		msleep(1);
+
+	/* reset the hardware */
+	writel(2, USB_USBCMD);
+	msleep(10);
+
+	/* unbind function drivers */
+	list_for_each_safe(entry, temp, &usb_function_list) {
+		struct usb_function_info *fi =
+			list_entry(entry, struct usb_function_info, list);
+		if (fi->func)
+			usb_unbind_driver(ui, fi);
+		list_del(entry);
+		kfree(fi);
+	}
+
+	/* finally, clean up any resources */
+	if (pdata->phy_shutdown)
+		pdata->phy_shutdown();
+	do_free_req(ui, to_msm_request(ui->setup_req));
+	disable_irq_wake(ui->irq);
+	free_irq(ui->irq, ui);
+#ifdef CONFIG_USB_FUNCTION_CAT_KIT
+	free_irq(ui->irq_usb_id_btn, 0);
+	gpio_free(ui->usb_id_pin_gpio);
+#endif	
+	dma_pool_destroy(ui->pool);
+	dma_free_coherent(&ui->pdev->dev, 4096, ui->buf, ui->dma);
+	iounmap(ui->addr);
+	clk_put(ui->clk);
+	clk_put(ui->pclk);
+	clk_put(ui->ebi1clk);
+	if (ui->func)
+		kfree(ui->func);
+	kfree(ui);
+	return 0;
+}
+
 static int usb_probe(struct platform_device *pdev)
 {
 	struct resource *res;
 	struct usb_info *ui;
-	int irq;
 	int ret;
 
 	ui = kzalloc(sizeof(struct usb_info), GFP_KERNEL);
 	if (!ui)
-		return -ENOMEM;
+		goto alloc_fail;
 
 	spin_lock_init(&ui->lock);
 	ui->pdev = pdev;
+	platform_set_drvdata(pdev, ui);
 
 	if (pdev->dev.platform_data) {
 		struct msm_hsusb_platform_data *pdata = pdev->dev.platform_data;
@@ -2651,45 +2699,43 @@ static int usb_probe(struct platform_device *pdev)
 
 		ui->func = kzalloc(sizeof(struct usb_function *) *
 				   pdata->num_functions, GFP_KERNEL);
-		if (!ui->func) {
-			kfree(ui);
-			return -ENOMEM;
-		}
+		if (ui->func == NULL)
+			goto func_alloc_fail;
 	}
 
-	irq = platform_get_irq(pdev, 0);
+	ui->irq = platform_get_irq(pdev, 0);
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res || (irq < 0))
-		return usb_free(ui, -ENODEV);
+	if (!res || (ui->irq < 0))
+		goto get_resources_fail;
 
 	ui->addr = ioremap(res->start, 4096);
 	if (!ui->addr)
-		return usb_free(ui, -ENOMEM);
+		goto ioremap_fail;
 
 	ui->buf = dma_alloc_coherent(&pdev->dev, 4096, &ui->dma, GFP_KERNEL);
 	if (!ui->buf)
-		return usb_free(ui, -ENOMEM);
+		goto dma_alloc_fail;
 
 	ui->pool = dma_pool_create("hsusb", NULL, 32, 32, 0);
 	if (!ui->pool)
-		return usb_free(ui, -ENOMEM);
+		goto pool_create_fail;
 
 	printk(KERN_INFO "usb_probe() io=%p, irq=%d, dma=%p(%x)\n",
-	       ui->addr, irq, ui->buf, ui->dma);
+	       ui->addr, ui->irq, ui->buf, ui->dma);
 
 	ui->clk = clk_get(&pdev->dev, "usb_hs_clk");
 	if (IS_ERR(ui->clk))
-		return usb_free(ui, PTR_ERR(ui->clk));
+		goto hs_clk_get_fail;
 
 	ui->pclk = clk_get(&pdev->dev, "usb_hs_pclk");
 	if (IS_ERR(ui->pclk))
-		return usb_free(ui, PTR_ERR(ui->pclk));
+		goto hs_pclk_get_fail;
 
 	/* memory barrier initialization in non-interrupt context */
 	dmb();
 	ui->ebi1clk = clk_get(NULL, "ebi1_clk");
 	if (IS_ERR(ui->ebi1clk))
-		return usb_free(ui, PTR_ERR(ui->ebi1clk));
+		goto hs_ebi1clk_get_fail;
 
 	/* disable interrupts before requesting irq */
 	clk_enable(ui->clk);
@@ -2699,17 +2745,17 @@ static int usb_probe(struct platform_device *pdev)
 	clk_disable(ui->pclk);
 	clk_disable(ui->clk);
 
-	ret = request_irq(irq, usb_interrupt, 0, pdev->name, ui);
+	ret = request_irq(ui->irq, usb_interrupt, 0, pdev->name, ui);
 	if (ret)
-		return usb_free(ui, ret);
-	enable_irq_wake(irq);
-	ui->irq = irq;
+		goto request_irq_fail;
+	enable_irq_wake(ui->irq);
 
 	the_usb_info = ui;
 
 	usb_debugfs_init(ui);
 
-	usb_prepare(ui);
+	if (usb_prepare(ui))
+		goto usb_prepare_fail;
 
 	/* initialize mfg serial number */
 
@@ -2742,20 +2788,136 @@ static int usb_probe(struct platform_device *pdev)
 		usb_car_kit_irq_init(ui);
 	}
 #endif
+	msm_hsusb_set_vbus_state_notifier(&msm_hsusb_set_vbus_state);
 	return 0;
+
+usb_prepare_fail:
+	disable_irq_wake(ui->irq);	
+request_irq_fail:
+	free_irq(ui->irq, ui);
+hs_ebi1clk_get_fail:
+	clk_put(ui->ebi1clk);
+hs_pclk_get_fail:
+	clk_put(ui->clk);
+hs_clk_get_fail:
+	dma_pool_destroy(ui->pool);
+pool_create_fail:
+	dma_free_coherent(&ui->pdev->dev, 4096, ui->buf, ui->dma);
+dma_alloc_fail:
+	iounmap(ui->addr);
+ioremap_fail:
+get_resources_fail:
+	if (ui->func)
+		kfree(ui->func);
+func_alloc_fail:
+	kfree(ui);
+alloc_fail:
+	printk(KERN_ERR "msm_hsusb_probe failed\n");
+	return -ENOMEM;
 }
 
 static struct platform_driver usb_driver = {
 	.probe = usb_probe,
+	.remove = usb_remove,
 	.driver = { .name = "msm_hsusb", },
 };
 
+#ifdef CONFIG_USB_FUNCTION_NULL
+extern void null_init(void);
+#endif
+#ifdef CONFIG_USB_FUNCTION_ZERO
+extern void zero_init(void);
+#endif
+#ifdef CONFIG_USB_FUNCTION_LOOPBACK
+extern void loopback_init(void);
+#endif
+#ifdef CONFIG_USB_FUNCTION_ADB
+extern void adb_init(void);
+#endif
+#ifdef CONFIG_USB_FUNCTION_UMS
+extern void ums_init(void);
+#endif
+#ifdef CONFIG_USB_FUNCTION_MASS_STORAGE
+extern void fsg_init(void);
+extern void fsg_exit(void);
+#endif
+#ifdef CONFIG_USB_FUNCTION_DIAG
+extern void diag_init(void);
+extern void diag_exit(void);
+#endif
+#ifdef CONFIG_USB_FUNCTION_ETHER
+extern void ether_init(void);
+extern void ether_exit(void);
+#endif
+#ifdef CONFIG_USB_FUNCTION_MODEM
+extern void gs_init(void);
+extern void gs_exit(void);
+#endif
+
+static void __exit usb_exit(void)
+{
+	platform_driver_unregister(&usb_driver);
+#ifdef CONFIG_USB_FUNCTION_MASS_STORAGE
+	fsg_exit();
+#endif
+#ifdef CONFIG_USB_FUNCTION_DIAG
+	diag_exit();
+#endif
+#ifdef CONFIG_USB_FUNCTION_ETHER
+	ether_exit();
+#endif
+#ifdef CONFIG_USB_FUNCTION_MODEM
+	gs_exit();
+#endif
+}
+
+module_exit(usb_exit);
+
+
 static int __init usb_init(void)
 {
-	return platform_driver_register(&usb_driver);
+	int ret;
+
+	if ((ret = platform_driver_register(&usb_driver)) < 0)
+		return ret;
+
+#ifdef CONFIG_USB_FUNCTION_NULL
+	null_init();
+#endif
+#ifdef CONFIG_USB_FUNCTION_ZERO
+	zero_init();
+#endif
+#ifdef CONFIG_USB_FUNCTION_LOOPBACK
+	loopback_init();
+#endif
+#ifdef CONFIG_USB_FUNCTION_ADB
+	adb_init();
+#endif
+#ifdef CONFIG_USB_FUNCTION_UMS
+	ums_init();
+#endif
+#ifdef CONFIG_USB_FUNCTION_MASS_STORAGE
+	fsg_init();
+#endif
+#ifdef CONFIG_USB_FUNCTION_DIAG
+	diag_init();
+#endif
+#ifdef CONFIG_USB_FUNCTION_ETHER
+	ether_init();
+#endif
+#ifdef CONFIG_USB_FUNCTION_MODEM
+	gs_init();
+#endif
+	usb_try_to_start();
+
+	return 0;
 }
 
 module_init(usb_init);
+
+MODULE_DESCRIPTION("MSM 72K USB Function Controller");
+MODULE_AUTHOR("Mike Lockwood, Brian Swetland");
+MODULE_LICENSE("GPL");
 
 static void copy_string_descriptor(char *string, char *buffer)
 {
@@ -3135,8 +3297,3 @@ error:
 	return -EINVAL;
 }
 EXPORT_SYMBOL(usb_ept_cancel_xfer);
-
-int usb_get_connect_type(void)
-{
-	return atomic_read(&connect_type);
-}

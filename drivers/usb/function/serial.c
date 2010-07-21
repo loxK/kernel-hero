@@ -226,10 +226,6 @@ struct gs_dev {
 
 /* Functions */
 
-/* module */
-static int __init gs_module_init(void);
-/* static void __exit gs_module_exit(void); */
-
 static int send_notify_data(struct usb_endpoint *ep, struct usb_request *req);
 /* tty driver */
 static int gs_open(struct tty_struct *tty, struct file *file);
@@ -257,7 +253,7 @@ static int gs_tiocmset(struct tty_struct *tty, struct file *file,
 			unsigned int set, unsigned int clear);
 
 /* Function driver */
-static void gs_bind(struct usb_endpoint **ept, void *_ctxt);
+static int gs_bind(struct usb_endpoint **ept, void *_ctxt);
 static void gs_unbind(void *);
 static int gs_setup(struct usb_ctrlrequest *req,
 		void *buf, int len, void *_ctxt);
@@ -326,9 +322,9 @@ struct usb_function *global_func_serial;
 struct gs_dev **dum_device;
 
 /* Module */
-MODULE_DESCRIPTION(GS_LONG_NAME);
-MODULE_AUTHOR("Al Borchers");
-MODULE_LICENSE("GPL");
+/* MODULE_DESCRIPTION(GS_LONG_NAME); */
+/* MODULE_AUTHOR("Al Borchers"); */
+/* MODULE_LICENSE("GPL"); */
 
 #ifdef GS_DEBUG
 module_param(debug, int, S_IRUGO | S_IWUSR);
@@ -346,9 +342,6 @@ MODULE_PARM_DESC(write_buf_size, "Write buffer size, default=8192");
 
 module_param(instances, int, 0);
 MODULE_PARM_DESC(instances, "Number of serial instances");
-
-module_init(gs_module_init);
-/* module_exit(gs_module_exit); */
 
 /******************************************************************************/
 
@@ -542,23 +535,26 @@ static struct platform_device usbserial_device = {
  *  Register as a USB gadget driver and a tty driver.
  */
 
-static int __init gs_module_init(void)
+int gs_init(void)
 {
 	int i, retval, j;
 	struct usb_function *func;
 
 	if (instances > MAX_INSTANCES || instances == 0) {
 		printk(KERN_ERR "Incorrect instances entered \n");
-		return -ENODEV;
+		retval = -ENODEV;
+		goto instances_fail;
 	}
 
 	gs_tty_wq = create_singlethread_workqueue("gs_tty");
-	if (gs_tty_wq == 0)
-		return -ENOMEM;
+	if (gs_tty_wq == 0) {
+		retval = -ENOMEM;
+		goto wq_fail;
+	}
 	gs_tty_driver = alloc_tty_driver(GS_NUM_PORTS);
 	if (!gs_tty_driver) {
-		destroy_workqueue(gs_tty_wq);
-		return -ENOMEM;
+		retval = -ENOMEM;
+		goto tty_alloc_fail;
 	}
 	gs_tty_driver->owner = THIS_MODULE;
 	gs_tty_driver->driver_name = GS_SHORT_NAME;
@@ -581,13 +577,8 @@ static int __init gs_module_init(void)
 		sema_init(&gs_open_close_sem[i], 1);
 
 	retval = tty_register_driver(gs_tty_driver);
-	if (retval) {
-		put_tty_driver(gs_tty_driver);
-		printk(KERN_ERR
-		       "gs_module_init: cannot register tty driver,ret = %d\n",
-		       retval);
-		return retval;
-	}
+	if (retval)
+		goto tty_register_fail;
 
 	for (i = 0; i < MAX_INSTANCES; i++)
 		tty_register_device(gs_tty_driver, i, NULL);
@@ -596,7 +587,7 @@ static int __init gs_module_init(void)
 				GFP_KERNEL);
 	if (!gs_devices) {
 		retval = -ENOMEM;
-		goto fail1;
+		goto gs_devices_alloc_fail;
 	}
 
 	for (i = 0; i < instances; i++) {
@@ -605,7 +596,7 @@ static int __init gs_module_init(void)
 		gs_devices[i] = kzalloc(sizeof(struct gs_dev), GFP_KERNEL);
 		if (!gs_devices[i]) {
 			retval = -ENOMEM;
-			goto fail2;
+			goto gs_dev_alloc_fail;
 		}
 		spin_lock_init(&gs_devices[i]->dev_lock);
 		INIT_LIST_HEAD(&gs_devices[i]->dev_req_list);
@@ -614,8 +605,16 @@ static int __init gs_module_init(void)
 		/*1 - Interface, 3 Endpoints-> Total 4 + 1 for NULL*/
 		gs_devices[i]->gs_fullspeed_header =
 		kmalloc(sizeof(struct usb_descriptor_header *) * 5, GFP_KERNEL);
+		if (!gs_devices[i]->gs_fullspeed_header) {
+			retval = -ENOMEM;
+			goto gs_dev_alloc_fail;
+		}
 		gs_devices[i]->gs_highspeed_header =
 		kmalloc(sizeof(struct usb_descriptor_header *) * 5, GFP_KERNEL);
+		if (!gs_devices[i]->gs_highspeed_header) {
+			retval = -ENOMEM;
+			goto gs_dev_alloc_fail;
+		}
 
 		/* setup usb interface descriptor */
 		gs_init_ifc_desc(&gs_devices[i]->gs_ifc_desc);
@@ -678,90 +677,98 @@ static int __init gs_module_init(void)
 			func->position_bit = USB_FUNCTION_SERIAL_NUM;
 			func->ifc_index = STRING_QSERIAL;
 		}
-
-		retval = usb_function_register(func);
-		if (retval) {
-			printk(KERN_ERR
-	      "gs_module_init: cannot register Function driver, ret = %d\n",
-			       retval);
-			goto fail3;
-		}
 	}
 
 	retval = platform_driver_register(&usbserial_driver);
-	if (retval < 0) {
-		printk("fail3\n");
-		goto fail3;
-	}
+	if (retval < 0)
+		goto platform_driver_fail;
 	retval = platform_device_register(&usbserial_device);
-	if (retval < 0) {
-		printk("fail4\n");
-		goto fail4;
-	}
+	if (retval < 0)
+		goto platform_device_fail;
 	retval = device_create_file(&usbserial_device.dev, &dev_attr_modem_enable);
 	if (retval != 0)
-		goto fail5;
+		goto modem_attr_fail;
 
 	retval = device_create_file(&usbserial_device.dev, &dev_attr_nmea_enable);
 	if (retval != 0)
-		goto fail6;
+		goto nmea_attr_fail;
 
 	retval = device_create_file(&usbserial_device.dev, &dev_attr_serial_enable);
 	if (retval != 0)
-		goto fail7;
+		goto serial_attr_fail;
+	
+	for (i = 0; i < instances; i++)
+		usb_function_register(&usb_function_serial[i]);
 
 	return 0;
 
-/*free all allocated resources*/
-fail7:
-	device_remove_file(&usbserial_device.dev, &dev_attr_nmea_enable);
-fail6:
-	device_remove_file(&usbserial_device.dev, &dev_attr_modem_enable);
-fail5:
-	platform_device_unregister(&usbserial_device);
-fail4:
-	platform_driver_unregister(&usbserial_driver);
-fail3:
-	for (j = 0 ; j == i ; j++) {
-		kfree(gs_devices[j]->gs_highspeed_header);
-		kfree(gs_devices[j]->gs_fullspeed_header);
+
+serial_attr_fail:
+	device_remove_file(&usbserial_device.dev, &dev_attr_nmea_enable);	
+nmea_attr_fail:
+	device_remove_file(&usbserial_device.dev, &dev_attr_modem_enable);	
+modem_attr_fail:
+	platform_device_unregister(&usbserial_device);	
+platform_device_fail:
+	platform_driver_unregister(&usbserial_driver);	
+platform_driver_fail:
+gs_dev_alloc_fail:
+	for (j = 0 ; j < instances ; j++) {
+		if (gs_devices[j] == NULL)
+			continue;
+
+		if (gs_devices[j]->gs_highspeed_header)
+			kfree(gs_devices[j]->gs_highspeed_header);
+		if (gs_devices[j]->gs_fullspeed_header)
+			kfree(gs_devices[j]->gs_fullspeed_header);
 		kfree(gs_devices[j]);
 	}
-fail2:
 	kfree(gs_devices);
-fail1:
+gs_devices_alloc_fail:
 	for (i = 0; i < MAX_INSTANCES; i++)
-		tty_unregister_device(gs_tty_driver, i);
+		tty_unregister_device(gs_tty_driver, i);	
 	tty_unregister_driver(gs_tty_driver);
+tty_register_fail:
 	put_tty_driver(gs_tty_driver);
+tty_alloc_fail:
+	destroy_workqueue(gs_tty_wq);
+wq_fail:
+instances_fail:
 	return retval;
 }
 
-#if 0
 /*
 * gs_module_exit
 *
 * Unregister as a tty driver and a USB gadget driver.
 */
-static void __exit gs_module_exit(void)
+void gs_exit(void)
 {
 	int i;
-	for (i = 0; i < instances; i++)
-		usb_function_unregister(&usb_function_serial[i]);
+
+	device_remove_file(&usbserial_device.dev, &dev_attr_serial_enable);
+	device_remove_file(&usbserial_device.dev, &dev_attr_nmea_enable);
+	device_remove_file(&usbserial_device.dev, &dev_attr_modem_enable);
+	platform_device_unregister(&usbserial_device);
+	platform_driver_unregister(&usbserial_driver);
 
 	for (i = 0; i < instances; ++i) {
-		kfree(gs_devices[i]->gs_fullspeed_header);
-		kfree(gs_devices[i]->gs_highspeed_header);
-		kfree(gs_devices[i]);
+		if (gs_devices[i]->gs_highspeed_header)
+			kfree(gs_devices[i]->gs_fullspeed_header);
+		if (gs_devices[i]->gs_fullspeed_header)
+			kfree(gs_devices[i]->gs_highspeed_header);
+		if (gs_devices[i])
+			kfree(gs_devices[i]);
 	}
+	kfree(gs_devices);
+
 	for (i = 0; i < MAX_INSTANCES; i++)
 		tty_unregister_device(gs_tty_driver, i);
 	tty_unregister_driver(gs_tty_driver);
 	put_tty_driver(gs_tty_driver);
-	printk(KERN_INFO "gs_module_exit: %s %s unloaded\n", GS_LONG_NAME,
-	       GS_VERSION_STR);
+	destroy_workqueue(gs_tty_wq);
 }
-#endif
+
 /* TTY Driver */
 /*
  * gs_open
@@ -847,6 +854,8 @@ static int gs_open(struct tty_struct *tty, struct file *file)
 			printk(KERN_ERR
 			       "gs_open: (%d,%p,%p) port disconnected (2)\n",
 			       port_num, tty, file);
+			if (buf)
+				gs_buf_free(buf);
 			port->port_in_use = 0;
 			ret = -EIO;
 			goto exit_unlock_port;
@@ -1621,39 +1630,36 @@ static void gs_status_complete(struct usb_endpoint *ep,
  * Called on module load.  Allocates and initializes the device
  * structure and a control request.
  */
-static void gs_bind(struct usb_endpoint **ept, void *_ctxt)
+static int gs_bind(struct usb_endpoint **ept, void *_ctxt)
 {
 	struct gs_dev *dev = _ctxt;
 	struct usb_function *func = dev->func;
-	int i = 0;
 	int ret;
+	struct gs_reqbuf *bh = &dev->statusreqbuf;
 
 	if (func == NULL) {
 		pr_err("%s: NULL function pointer\n", __func__);
-		return;
-	} else
-		printk("gs_bind:%s\n", func->ifc_name);
+		return -ENODEV;
+	}
 
 	ret = gs_alloc_ports(dev, GFP_KERNEL);
 	if (ret != 0) {
 		pr_err("%s: cannot allocate ports\n", __func__);
-		gs_unbind(_ctxt);
-		return;
+		return -ENODEV;
 	}
 
 	dev->dev_in_ep = ept[2];
 	dev->dev_out_ep = ept[1];
 	dev->dev_notify_ep = ept[0];
 
-	for (i = 0; i < GS_DEFAULT_INT_REQ; ++i) {
-		struct gs_reqbuf *bh = &dev->statusreqbuf;
-		bh->buf = kmalloc(64, GFP_KERNEL);
-		if (!bh->buf)
-			return;
+	bh->buf = kmalloc(64, GFP_KERNEL);
+	if (!bh->buf) {
+		gs_free_ports(dev);
+		return -ENOMEM;
 	}
 
 	dev->bound = 1;
-	return;
+	return 0;
 }
 
 /*
@@ -1662,7 +1668,7 @@ static void gs_bind(struct usb_endpoint **ept, void *_ctxt)
  * Called on module unload.  Frees the control request and device
  * structure.
  */
-static void /* __init_or_exit */ gs_unbind(void *_ctxt)
+static void gs_unbind(void *_ctxt)
 {
 	struct gs_dev *dev = _ctxt;
 
@@ -1676,7 +1682,6 @@ static void /* __init_or_exit */ gs_unbind(void *_ctxt)
 	kfree(dev->statusreqbuf.buf);
 	gs_free_ports(dev);
 	dev->bound = 0;
-	pr_debug("%s: %s %s\n", __func__, GS_LONG_NAME, GS_VERSION_STR);
 }
 
 static int gs_setup(struct usb_ctrlrequest *ctrl,

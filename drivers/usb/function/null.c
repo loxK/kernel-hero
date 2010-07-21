@@ -31,20 +31,28 @@ struct null_context
 
 static struct null_context _context;
 
-static void null_bind(struct usb_endpoint **ept, void *_ctxt)
+static int null_bind(struct usb_endpoint **ept, void *_ctxt)
 {
 	struct null_context *ctxt = _ctxt;
 	ctxt->out = ept[0];
-	printk(KERN_INFO "null_bind() %p\n", ctxt->out);
 
-	ctxt->req0 = usb_ept_alloc_req(ctxt->out, 4096);
-	ctxt->req1 = usb_ept_alloc_req(ctxt->out, 4096);
+	if ((ctxt->req0 = usb_ept_alloc_req(ctxt->out, 4096)) == NULL)
+		goto req0_fail;
+	if ((ctxt->req1 = usb_ept_alloc_req(ctxt->out, 4096)) == NULL)
+		goto req1_fail;
+	return 0;
+
+req1_fail:
+	usb_ept_free_req(ctxt->out, ctxt->req0);
+req0_fail:
+	printk(KERN_WARNING "null_bind() could not allocate requests\n");
+	return -1;
 }
 
 static void null_unbind(void *_ctxt)
 {
 	struct null_context *ctxt = _ctxt;
-	printk(KERN_INFO "null_unbind()\n");
+
 	if (ctxt->req0) {
 		usb_ept_free_req(ctxt->out, ctxt->req0);
 		ctxt->req0 = 0;
@@ -62,7 +70,6 @@ static void null_queue_out(struct null_context *ctxt, struct usb_request *req);
 static void null_out_complete(struct usb_endpoint *ept, struct usb_request *req)
 {
 	struct null_context *ctxt = req->context;
-	unsigned char *data = req->buf;
 
 	if (req->status != -ENODEV)
 		null_queue_out(ctxt, req);
@@ -108,11 +115,7 @@ static struct usb_function usb_func_null = {
 	.ifc_ept_type = { EPT_BULK_OUT },
 };
 
-static int __init null_init(void)
+void null_init(void)
 {
-	printk(KERN_INFO "null_init()\n");
-	usb_function_register(&usb_func_null);
-	return 0;
+       usb_function_register(&usb_func_null);
 }
-
-module_init(null_init);

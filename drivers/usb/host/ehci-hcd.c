@@ -1036,6 +1036,11 @@ MODULE_LICENSE ("GPL");
 #define	PLATFORM_DRIVER		ixp4xx_ehci_driver
 #endif
 
+#if defined(CONFIG_ARCH_MSM7XXX) || defined(CONFIG_ARCH_MSM) || defined(ARCH_MSM7X00A)
+#include "ehci-msm.c"
+#define	PLATFORM_DRIVER		ehci_msm_driver
+#endif
+
 #if !defined(PCI_DRIVER) && !defined(PLATFORM_DRIVER) && \
     !defined(PS3_SYSTEM_BUS_DRIVER) && !defined(OF_PLATFORM_DRIVER)
 #error "missing bus glue for ehci-hcd"

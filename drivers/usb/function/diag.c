@@ -84,15 +84,34 @@ static struct diag_context _context;
 
 static void smd_try_to_send(struct diag_context *ctxt);
 
-static void diag_bind(struct usb_endpoint **ept, void *_ctxt)
+
+static void diag_unbind(void *_ctxt)
+{
+	struct diag_context *ctxt = _ctxt;
+	
+	usb_ept_free_req(ctxt->out, ctxt->req_out);
+	usb_ept_free_req(ctxt->in, ctxt->req_in);
+}
+
+
+static int diag_bind(struct usb_endpoint **ept, void *_ctxt)
 {
 	struct diag_context *ctxt = _ctxt;
 
 	ctxt->out = ept[0];
 	ctxt->in = ept[1];
 
-	ctxt->req_out = usb_ept_alloc_req(ctxt->out, 4096);
-	ctxt->req_in = usb_ept_alloc_req(ctxt->in, 4096);
+	if ((ctxt->req_out = usb_ept_alloc_req(ctxt->out, 4096)) == NULL)
+		goto out_alloc_fail;
+	if ((ctxt->req_in = usb_ept_alloc_req(ctxt->in, 4096)) == NULL)
+		goto in_alloc_fail;
+	
+	return 0;
+
+in_alloc_fail:
+	usb_ept_free_req(ctxt->out, ctxt->req_out);
+out_alloc_fail:
+	return -EINVAL;
 }
 
 static void diag_queue_in(struct diag_context *ctxt, void *data, unsigned len);
@@ -218,6 +237,7 @@ static void diag_configure(int configured, void *_ctxt)
 
 static struct usb_function usb_func_diag = {
 	.bind = diag_bind,
+	.unbind = diag_unbind,
 	.configure = diag_configure,
 
 	.name = "diag",
@@ -233,31 +253,52 @@ static struct usb_function usb_func_diag = {
 	.ifc_ept_type = { EPT_BULK_OUT, EPT_BULK_IN },
 };
 
+static int msm_diag_remove(struct platform_device *pdev)
+{
+	struct diag_context *ctxt = &_context;
+	if (ctxt->ch)
+		smd_close(ctxt->ch);
+	return 0;
+}
+
 static int msm_diag_probe(struct platform_device *pdev)
 {
 	struct diag_context *ctxt = &_context;
 	int r;
 	r = smd_open("SMD_DIAG", &ctxt->ch, ctxt, smd_diag_notify);
-	return 0;
+	return r;
 }
 
 static struct platform_driver msm_smd_ch1_driver = {
 	.probe = msm_diag_probe,
+	.remove = msm_diag_remove,
 	.driver = {
 		.name = "SMD_DIAG",
 		.owner = THIS_MODULE,
 	},
 };
 
-static int __init diag_init(void)
+void diag_init(void)
 {
 	int r;
+	
+	r = platform_driver_register(&msm_smd_ch1_driver);
+	if (r)
+		goto platform_driver_reg_fail;
 	r = usb_function_register(&usb_func_diag);
+	if (r)
+		goto usb_function_reg_fail;
+	cleanup = 1;
+	return 0;
 
-	if (!r)
-		r = platform_driver_register(&msm_smd_ch1_driver);
-
+usb_function_reg_fail:
+	platform_driver_unregister(&msm_smd_ch1_driver);
+platform_driver_reg_fail;
 	return r;
 }
 
-module_init(diag_init);
+void diag_exit(void)
+{
+	if (cleanup)
+		platform_driver_unregister(&msm_smd_ch1_driver);
+}

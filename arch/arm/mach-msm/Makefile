@@ -14,6 +14,7 @@ obj-y += clock.o
 obj-y += gpio.o generic_gpio.o
 obj-y += nand_partitions.o
 obj-y += drv_callback.o
+obj-y += mass_storage_stub.o
 obj-$(CONFIG_ARCH_QSD8X50) += pmic.o htc_wifi_nvs.o htc_bluetooth.o
 
 obj-$(CONFIG_MSM_FIQ_SUPPORT) += fiq_glue.o

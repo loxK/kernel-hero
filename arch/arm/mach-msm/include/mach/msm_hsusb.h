@@ -21,7 +21,7 @@
 
 /* platform device data for msm_hsusb driver */
 
-#ifdef CONFIG_USB_FUNCTION
+#ifdef CONFIG_USB_FUNCTION_SELECTED
 /* matches a product ID to a list of enabled functions */
 struct msm_hsusb_product {
 	/* product ID for usb_device_descriptor.idProduct */
@@ -50,7 +50,7 @@ struct msm_hsusb_platform_data {
 	/* val, reg pairs terminated by -1 */
 	int *phy_init_seq;
 
-#ifdef CONFIG_USB_FUNCTION
+#ifdef CONFIG_USB_FUNCTION_SELECTED
 	/* USB device descriptor fields */
 	__u16 vendor_id;
 

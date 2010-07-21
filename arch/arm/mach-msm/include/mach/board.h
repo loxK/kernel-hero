@@ -108,15 +108,6 @@ void __init msm_acpu_clock_init(struct msm_acpu_clock_platform_data *);
 
 #if defined(CONFIG_USB_FUNCTION_MSM_HSUSB) || defined(CONFIG_USB_MSM_72K)
 void msm_hsusb_set_vbus_state(int online);
-/* START: add USB connected notify function */
-struct t_usb_status_notifier{
-	struct list_head notifier_link;
-	const char *name;
-	void (*func)(int online);
-};
-	int usb_register_notifier(struct t_usb_status_notifier *);
-	static LIST_HEAD(g_lh_usb_notifier_list);
-/* END: add USB connected notify function */
 #else
 static inline void msm_hsusb_set_vbus_state(int online) {}
 #endif
@@ -124,5 +115,10 @@ static inline void msm_hsusb_set_vbus_state(int online) {}
 unsigned __init parse_tag_skuid(const struct tag *tags);
 unsigned int __init parse_tag_engineerid(const struct tag *tags);
 int __init board_mfg_mode(void);
+
+extern void htc_battery_usb_status_notifier_func(int online);
+extern void msm_usb_set_connect_status(int connected);
+extern int msm_usb_get_connect_status(void);
+extern void msm_hsusb_set_vbus_state_notifier(void (*setit)(int online));
 
 #endif

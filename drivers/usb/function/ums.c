@@ -332,12 +332,12 @@ static struct miscdevice ums_device = {
 	.fops = &ums_fops,
 };
 
-static void ums_bind(struct usb_endpoint **ept, void *_ctxt)
+static int ums_bind(struct usb_endpoint **ept, void *_ctxt)
 {
 	struct ums_context *ctxt = _ctxt;
 	struct usb_request *req;
 	int n;
-	
+
 	ctxt->out = ept[0];
 	ctxt->in = ept[1];
 
@@ -345,7 +345,7 @@ static void ums_bind(struct usb_endpoint **ept, void *_ctxt)
 	
 	for(n = 0; n < RX_REQ_MAX; n++) {
 		req = usb_ept_alloc_req(ctxt->out, 4096);
-		if(req == 0) goto fail;
+		if(req == 0) goto rx_idle_fail;
 		req->context = ctxt;
 		req->complete = ums_complete_out;
 		req_put(ctxt, &ctxt->rx_idle, req);
@@ -353,22 +353,52 @@ static void ums_bind(struct usb_endpoint **ept, void *_ctxt)
 
 	for(n = 0; n < TX_REQ_MAX; n++) {
 		req = usb_ept_alloc_req(ctxt->in, 4096);
-		if(req == 0) goto fail;
+		if(req == 0) goto tx_idle_fail;
 		req->context = ctxt;
 		req->complete = ums_complete_in;
 		req_put(ctxt, &ctxt->tx_idle, req);
 	}
 
+	if (misc_register(&ums_device))
+		goto misc_register_fail;
+
 	printk("ums_bind() allocated %d rx and %d tx requests\n",
 	       RX_REQ_MAX, TX_REQ_MAX);
-	
-	misc_register(&ums_device);
-	return;
-	
-fail:
-	printk("ums_bind() could not allocate requests\n");
+	return 0;
 
-	/* XXX release any we did allocate */
+misc_register_fail:
+tx_idle_fail:
+        while ((req = req_get(ctxt, &ctxt->tx_idle))) {
+                usb_ept_free_req(ctxt->in, req);
+        }
+rx_idle_fail:
+	while ((req = req_get(ctxt, &ctxt->rx_idle))) {
+                usb_ept_free_req(ctxt->out, req);
+        }
+	printk("ums_bind() could not allocate requests\n");
+	return -1;
+}
+
+static void ums_unbind(void *_ctxt)
+{
+	struct ums_context *ctxt = _ctxt;
+	struct usb_request *req;
+
+	if(ctxt->read_req) {
+		usb_ept_free_req(ctxt->out, ctxt->read_req);
+		ctxt->read_req = 0;
+	}
+	while((req = req_get(ctxt, &ctxt->rx_done))) {
+		usb_ept_free_req(ctxt->out, req);
+	}
+	while ((req = req_get(ctxt, &ctxt->rx_idle))) {
+                usb_ept_free_req(ctxt->out, req);
+        }
+        while ((req = req_get(ctxt, &ctxt->tx_idle))) {
+                usb_ept_free_req(ctxt->in, req);
+        }
+
+	misc_deregister(&ums_device);
 }
 
 static int ums_setup(struct usb_ctrlrequest* req, void* buf, int len, void *_ctxt)
@@ -429,6 +459,7 @@ static void ums_configure(int configured, void *_ctxt)
 
 static struct usb_function usb_func_ums = {
 	.bind = ums_bind,
+	.unbind = ums_unbind,
 	.configure = ums_configure,
 	.setup = ums_setup,
 
@@ -445,7 +476,7 @@ static struct usb_function usb_func_ums = {
 	.ifc_ept_type = { EPT_BULK_OUT, EPT_BULK_IN },
 };
 
-static int __init ums_init(void)
+void ums_init(void)
 {
 	struct ums_context *ctxt = &_context;
 	DBG("ums_init()\n");
@@ -458,12 +489,10 @@ static int __init ums_init(void)
 	atomic_set(&ctxt->open_excl, 0);
 	atomic_set(&ctxt->read_excl, 0);
 	atomic_set(&ctxt->write_excl, 0);
-	
+
 	INIT_LIST_HEAD(&ctxt->rx_idle);
 	INIT_LIST_HEAD(&ctxt->rx_done);
 	INIT_LIST_HEAD(&ctxt->tx_idle);
-	
-	return usb_function_register(&usb_func_ums);
-}
 
-module_init(ums_init);
+	usb_function_register(&usb_func_ums);
+}

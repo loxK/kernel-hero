@@ -31,23 +31,31 @@ struct zero_context
 
 static struct zero_context _context;
 
-static void zero_bind(struct usb_endpoint **ept, void *_ctxt)
+static int zero_bind(struct usb_endpoint **ept, void *_ctxt)
 {
 	struct zero_context *ctxt = _ctxt;
 	ctxt->in = ept[0];
-	printk(KERN_INFO "zero_bind() %p\n", ctxt->in);
 
-	ctxt->req0 = usb_ept_alloc_req(ctxt->in, 4096);
-	ctxt->req1 = usb_ept_alloc_req(ctxt->in, 4096);
+	if ((ctxt->req0 = usb_ept_alloc_req(ctxt->in, 4096)) == NULL)
+		goto req0_fail;
+	if ((ctxt->req1 = usb_ept_alloc_req(ctxt->in, 4096)) == NULL)
+		goto req1_fail;
 
 	memset(ctxt->req0->buf, 0, 4096);
 	memset(ctxt->req1->buf, 0, 4096);
+
+	return 0;
+
+req1_fail:
+	usb_ept_free_req(ctxt->in, ctxt->req0);
+req0_fail:
+	printk("ums_bind() could not allocate requests\n");
+	return -1;
 }
 
 static void zero_unbind(void *_ctxt)
 {
 	struct zero_context *ctxt = _ctxt;
-	printk(KERN_INFO "null_unbind()\n");
 	if (ctxt->req0) {
 		usb_ept_free_req(ctxt->in, ctxt->req0);
 		ctxt->req0 = 0;
@@ -64,7 +72,6 @@ static void zero_queue_in(struct zero_context *ctxt, struct usb_request *req);
 static void zero_in_complete(struct usb_endpoint *ept, struct usb_request *req)
 {
 	struct zero_context *ctxt = req->context;
-	unsigned char *data = req->buf;
 
 	if (req->status != -ENODEV)
 		zero_queue_in(ctxt, req);
@@ -110,11 +117,7 @@ static struct usb_function usb_func_zero = {
 	.ifc_ept_type = { EPT_BULK_IN },
 };
 
-static int __init zero_init(void)
+void zero_init(void)
 {
-	printk(KERN_INFO "zero_init()\n");
-	usb_function_register(&usb_func_zero);
-	return 0;
+       usb_function_register(&usb_func_zero);
 }
-
-module_init(zero_init);

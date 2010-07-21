@@ -32,17 +32,40 @@ struct loopback_context
 
 static struct loopback_context _context;
 
-static void loopback_bind(struct usb_endpoint **ept, void *_ctxt)
+static int loopback_bind(struct usb_endpoint **ept, void *_ctxt)
 {
 	struct loopback_context *ctxt = _ctxt;
 
 	ctxt->out = ept[0];
 	ctxt->in = ept[1];
 
-	printk(KERN_INFO "loopback_bind() %p, %p\n", ctxt->out, ctxt->in);
+	if ((ctxt->req_out = usb_ept_alloc_req(ctxt->out, 4096)) == NULL)
+		goto req_out_fail;
+	if ((ctxt->req_in = usb_ept_alloc_req(ctxt->in, 4096)) == NULL)
+		goto req_in_fail;
+	return 0;
 
-	ctxt->req_out = usb_ept_alloc_req(ctxt->out, 4096);
-	ctxt->req_in = usb_ept_alloc_req(ctxt->in, 4096);
+req_in_fail:
+	usb_ept_free_req(ctxt->out, ctxt->req_out);
+req_out_fail:
+	printk(KERN_ERR "%s() failed\n", __func__);
+	return -1;
+}
+
+static void loopback_unbind(void *_ctxt)
+{
+	struct loopback_context *ctxt = _ctxt;
+
+	if (ctxt->req_in) {
+		usb_ept_free_req(ctxt->in, ctxt->req_in);
+		ctxt->req_in = 0;
+	}
+	if (ctxt->req_out) {
+		usb_ept_free_req(ctxt->out, ctxt->req_out);
+		ctxt->req_out = 0;
+	}
+	ctxt->in = 0;
+	ctxt->out = 0;
 }
 
 static void loopback_queue_in(struct loopback_context *ctxt, void *data, unsigned len);
@@ -104,6 +127,7 @@ static void loopback_configure(int configured, void *_ctxt)
 
 static struct usb_function usb_func_loopback = {
 	.bind = loopback_bind,
+	.unbind = loopback_unbind,
 	.configure = loopback_configure,
 
 	.name = "loopback",
@@ -119,10 +143,7 @@ static struct usb_function usb_func_loopback = {
 	.ifc_ept_type = { EPT_BULK_OUT, EPT_BULK_IN },
 };
 
-static int __init loopback_init(void)
+void loopback_init(void)
 {
-	printk(KERN_INFO "loopback_init()\n");
-	return usb_function_register(&usb_func_loopback);
+       usb_function_register(&usb_func_loopback);
 }
-
-module_init(loopback_init);
