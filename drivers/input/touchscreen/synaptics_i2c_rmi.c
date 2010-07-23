@@ -251,7 +251,7 @@ static void synaptics_ts_work_func(struct work_struct *work)
 				input_report_abs(ts->input_dev, ABS_PRESSURE, z);
 				input_report_abs(ts->input_dev, ABS_TOOL_WIDTH, w);
 				input_report_key(ts->input_dev, BTN_TOUCH, finger);
-				//finger2_pressed = finger > 1 && finger != 7;
+				finger2_pressed = finger > 1 && finger != 7;
 				input_report_key(ts->input_dev, BTN_2, finger2_pressed);
 				if (finger2_pressed) {
 					input_report_abs(ts->input_dev, ABS_HAT0X, pos[1][0]);
