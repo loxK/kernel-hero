@@ -49,9 +49,11 @@ include/linux/compile.h
 include/linux/version.h
 include/linux/utsrelease.h
 include/linux/bounds.h
-
+adb
+fastboot
 # stgit generated dirs
 patches-*
+bak/
 
 # quilt's files
 patches

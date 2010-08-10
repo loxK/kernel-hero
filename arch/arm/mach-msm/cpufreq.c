@@ -17,6 +17,56 @@
  *
  */
 
+#ifdef CONFIG_CPUSPEED_DEFAULT
+#define MSM_CPUFREQ_MIN 352000
+#define MSM_CPUFREQ_MAX 614400
+#endif
+
+#ifdef CONFIG_CPUSPEED_LOW614
+#define MSM_CPUFREQ_MIN 245760
+#define MSM_CPUFREQ_MAX 614400
+#endif
+
+#ifdef CONFIG_CPUSPEED_LOW691
+#define MSM_CPUFREQ_MIN 245760
+#define MSM_CPUFREQ_MAX 691200
+#endif
+
+#ifdef CONFIG_CPUSPEED_LOW729
+#define MSM_CPUFREQ_MIN 245760
+#define MSM_CPUFREQ_MAX 729600
+#endif
+
+#ifdef CONFIG_CPUSPEED_LOW748
+#define MSM_CPUFREQ_MIN 245760
+#define MSM_CPUFREQ_MAX 748800
+#endif
+
+#ifdef CONFIG_CPUSPEED_LOW768
+#define MSM_CPUFREQ_MIN 245760
+#define MSM_CPUFREQ_MAX 768000
+#endif
+
+#ifdef CONFIG_CPUSPEED_HIGH691
+#define MSM_CPUFREQ_MIN 352000
+#define MSM_CPUFREQ_MAX 691200
+#endif
+
+#ifdef CONFIG_CPUSPEED_HIGH729
+#define MSM_CPUFREQ_MIN 352000
+#define MSM_CPUFREQ_MAX 729600
+#endif
+
+#ifdef CONFIG_CPUSPEED_HIGH748
+#define MSM_CPUFREQ_MIN 352000
+#define MSM_CPUFREQ_MAX 748800
+#endif
+
+#ifdef CONFIG_CPUSPEED_HIGH768
+#define MSM_CPUFREQ_MIN 352000
+#define MSM_CPUFREQ_MAX 768000
+#endif
+
 #include <linux/cpufreq.h>
 #include <linux/earlysuspend.h>
 #include <linux/init.h>
@@ -93,11 +143,11 @@ static int __init msm_cpufreq_init(struct cpufreq_policy *policy)
 
 	policy->cur = acpuclk_get_rate();
 	if (cpufreq_frequency_table_cpuinfo(policy, table)) {
-		policy->cpuinfo.min_freq = CONFIG_MSM_CPU_FREQ_ONDEMAND_MIN;
-		policy->cpuinfo.max_freq = CONFIG_MSM_CPU_FREQ_ONDEMAND_MAX;
+		policy->cpuinfo.min_freq = MSM_CPUFREQ_MIN;
+		policy->cpuinfo.max_freq = MSM_CPUFREQ_MAX;
 	}
-	policy->min = CONFIG_MSM_CPU_FREQ_ONDEMAND_MIN;
-	policy->max = CONFIG_MSM_CPU_FREQ_ONDEMAND_MAX;
+	policy->min = MSM_CPUFREQ_MIN;
+	policy->max = MSM_CPUFREQ_MAX;
 
 	policy->cpuinfo.transition_latency =
 		acpuclk_get_switch_time() * NSEC_PER_USEC;

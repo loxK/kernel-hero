@@ -57,10 +57,67 @@ config MSM_MDP31
 config TURBO_MODE
 	bool "Turbo mode"
 	depends on ARCH_MSM7225 || ARCH_MSM7X00A
-	default n
+	default y
 	help
 	  This option is used to indicate hardware support for running the
 	  memory bus at a higher speed.(only for 7X00A/7225)
+
+choice 
+	prompt "CPU frequency table selection"
+	default CPUSPEED_DEFAULT
+	depends on TURBO_MODE
+	depends on CPU_FREQ
+
+config CPUSPEED_DEFAULT
+	bool "352MHz - 614MHz (default)"
+	help
+	  Gives frequency table 352000 614400
+
+config CPUSPEED_LOW614
+	bool "19MHz - 614MHz"
+	help
+	  Gives frequency table 19200 122880 245760 614400
+
+config CPUSPEED_LOW691
+	bool "19MHz - 691MHz"
+	help
+	  Gives frequency table 19200 122880 245760 691200
+
+config CPUSPEED_LOW729
+	bool "19MHz - 729MHz"
+	help
+	  Gives frequency table 19200 122880 245760 729600
+
+config CPUSPEED_LOW748
+	bool "19MHz - 748MHz"
+	help
+	  Gives frequency table 19200 122880 245760 748800
+
+config CPUSPEED_LOW768
+	bool "19MHz - 768MHz"
+	help
+	  Gives frequency table 19200 122880 245760 768000
+
+config CPUSPEED_HIGH691
+	bool "352MHz - 691MHz"
+	help
+	  Gives frequency table 352000 691200
+
+config CPUSPEED_HIGH729
+	bool "352MHz - 729MHz"
+	help
+	  Gives frequency table 352000 729600
+
+config CPUSPEED_HIGH748
+	bool "352MHz - 748MHz"
+	help
+	  Gives frequency table 352000 748800
+
+config CPUSPEED_HIGH768
+	bool "352MHz - 768MHz"
+	help
+	  Gives frequency table 352000 768000
+endchoice
 
 config PERFLOCK
 	depends on CPU_FREQ

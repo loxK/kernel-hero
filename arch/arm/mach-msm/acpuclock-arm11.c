@@ -180,19 +180,91 @@ static struct cpufreq_frequency_table msm7227_freq_table[] = {
 
 static struct cpufreq_frequency_table msm72xx_freq_table[] = {
 #if defined(CONFIG_TURBO_MODE)
+#ifdef CONFIG_CPUSPEED_DEFAULT
+/* Default safe table non OC start */
+
+      { 0, 352000 },
+      { 1, 614400 },
+      { 2, CPUFREQ_TABLE_END },
+
+/* Default safe table non OC end */
+#endif
+#ifdef CONFIG_CPUSPEED_LOW614
+/* Default low freq table non OC start */
+
+      { 0, 19200 },
+      { 1, 122880 },
+      { 2, 245760 },
+      { 3, 614400 },
+      { 4, CPUFREQ_TABLE_END },
+
+/* Default low freq table non OC end */
+#endif
+#ifdef CONFIG_CPUSPEED_LOW691
+/* Default low freq table 691 OC start */
 	{ 0, 19200 },
+	{ 1, 122880 },
+	{ 2, 245760 },
+	{ 3, 691200 },
+        { 4, CPUFREQ_TABLE_END },
+/* Default low freq table 691 OC end */
+#endif
+#ifdef CONFIG_CPUSPEED_LOW729
+/* Default low freq table 729 OC start */
+        { 0, 19200 },
         { 1, 122880 },
-        { 2, 160000 },
-        { 3, 245760 },
-        { 4, 352000 },
-        { 5, 518400 },
-        { 6, 576000 },
-        { 7, 652800 },
-        { 8, 691200 },
-        { 9, 710400 },
-	{ 10, 729600 },
-	{ 11, 748800 },
-        { 12, CPUFREQ_TABLE_END }
+        { 2, 245760 },
+	{ 3, 729600 },
+        { 4, CPUFREQ_TABLE_END },
+/* Default low freq table 729 OC end */
+#endif
+#ifdef CONFIG_CPUSPEED_LOW748
+/* Default low freq table 748 OC start */
+        { 0, 19200 },
+        { 1, 122880 },
+        { 2, 245760 },
+	{ 3, 748800 },
+        { 4, CPUFREQ_TABLE_END },
+/* Default low freq table 748 OC end */
+#endif
+#ifdef CONFIG_CPUSPEED_LOW768
+/* Default low freq table 768 OC start */
+        { 0, 19200 },
+        { 1, 122880 },
+        { 2, 245760 },
+	{ 3, 768000 },
+        { 4, CPUFREQ_TABLE_END },
+/* Default low freq table 768 OC end */
+#endif
+#ifdef CONFIG_CPUSPEED_HIGH691
+/* Default high freq table 691 OC start */
+        { 0, 352000 },
+        { 1, 691200 },
+        { 2, CPUFREQ_TABLE_END },
+/* Default high freq table 691 OC end */
+#endif
+#ifdef CONFIG_CPUSPEED_HIGH729
+/* Default high freq table 729 OC start */
+        { 0, 352000 },
+        { 1, 729600 },
+        { 2, CPUFREQ_TABLE_END },
+/* Default high freq table 729 OC end */
+#endif
+#ifdef CONFIG_CPUSPEED_HIGH748
+/* Default high freq table 748 OC start */
+        { 0, 352000 },
+        { 1, 748800 },
+        { 2, CPUFREQ_TABLE_END },
+/* Default high freq table 748 OC end */
+#endif
+#ifdef CONFIG_CPUSPEED_HIGH768
+/* Default high freq table 768 OC start */
+        { 0, 352000 },
+	{ 1, 768000 },
+        { 2, CPUFREQ_TABLE_END },
+/* Default high freq table 768 OC end */
+#endif
+
 #else
 	{ 0, 19200 },
 	{ 1, 122880 },
