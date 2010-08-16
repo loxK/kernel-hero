@@ -726,6 +726,16 @@ config USB_ANDROID
 	  Say "y" to link the driver statically, or "m" to build a
 	  dynamically linked module called "g_android".
 
+config USB_ANDROID_RNDIS_WCEIS
+        boolean "Use Windows Internet Sharing Class/SubClass/Protocol"
+        depends on USB_ANDROID_RNDIS
+        help
+         Causes the driver to look like a Windows-compatible Internet
+         Sharing device, so Windows auto-detects it.
+
+         If you enable this option, the device is no longer CDC ethernet
+         compatible.
+
 config USB_CDC_COMPOSITE
 	tristate "CDC Composite Device (Ethernet and ACM)"
 	depends on NET
