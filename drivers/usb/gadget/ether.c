@@ -158,11 +158,7 @@ static struct usb_device_descriptor device_desc = {
 
 	.bcdUSB =		__constant_cpu_to_le16 (0x0200),
 
-#ifdef CONFIG_USB_ANDROID_RNDIS_WCEIS
-	.bDeviceClass =		USB_CLASS_WIRELESS_CONTROLLER,
-#else
 	.bDeviceClass =		USB_CLASS_COMM,
-#endif
 	.bDeviceSubClass =	0,
 	.bDeviceProtocol =	0,
 	/* .bMaxPacketSize0 = f(hardware) */
