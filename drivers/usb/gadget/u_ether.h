@@ -114,14 +114,6 @@ int ecm_bind_config(struct usb_configuration *c, u8 ethaddr[ETH_ALEN]);
 
 int rndis_bind_config(struct usb_configuration *c, u8 ethaddr[ETH_ALEN]);
 
-#else
-
-static inline int
-rndis_bind_config(struct usb_configuration *c, u8 ethaddr[ETH_ALEN])
-{
-	return 0;
-}
-
 #endif
 
 #endif /* __U_ETHER_H */
