@@ -94,8 +94,8 @@ static inline void _unlock(atomic_t *excl)
 	atomic_dec(excl);
 }
 
-/* add a request to the tail of a list */
-static void req_put(struct ums_context *ctxt, struct list_head *head, struct usb_request *req)
+/* #DUPE add a request to the tail of a list */
+/*static void req_put(struct ums_context *ctxt, struct list_head *head, struct usb_request *req)
 {
 	unsigned long flags;
 
@@ -103,7 +103,7 @@ static void req_put(struct ums_context *ctxt, struct list_head *head, struct usb
 	list_add_tail(&req->list, head);
 	spin_unlock_irqrestore(&ctxt->lock, flags);
 }
-
+*/
 /* remove a request from the head of a list */
 static struct usb_request *req_get(struct ums_context *ctxt, struct list_head *head)
 {
