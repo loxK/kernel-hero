@@ -25,7 +25,6 @@
 #include <asm/mach/flash.h>
 #include <linux/mtd/nand.h>
 #include <linux/mtd/partitions.h>
-#include <linux/usb/android_composite.h>
 #include <asm/mach/mmc.h>
 #include <asm/setup.h>
 
@@ -271,13 +270,8 @@ void msm_hsusb_8x50_phy_reset(void)
 /* adjust eye diagram, disable vbusvalid interrupts */
 static int hsusb_phy_init_seq[] = { 0x1D, 0x0D, 0x1D, 0x10, -1 };
 
-
-
 #ifdef CONFIG_USB_FUNCTION
 static char *usb_functions[] = {
-#ifdef CONFIG_USB_ANDROID_RNDIS
-	"rndis",
-#endif
 #if defined(CONFIG_USB_FUNCTION_MASS_STORAGE) || defined(CONFIG_USB_FUNCTION_UMS)
 	"usb_mass_storage",
 #endif
@@ -367,6 +361,7 @@ struct msm_hsusb_platform_data msm_hsusb_pdata = {
 	.version = 0x0100,
 	.product_name = "Android Phone",
 	.manufacturer_name = "HTC",
+
 	.functions = usb_functions,
 	.num_functions = ARRAY_SIZE(usb_functions),
 	.products = usb_products,
@@ -392,18 +387,22 @@ static struct platform_device usb_mass_storage_device = {
 };
 #endif
 
-#ifdef CONFIG_USB_ANDROID_RNDIS
-static struct usb_ether_platform_data rndis_pdata = {
-	/* ethaddr is filled by board_serialno_setup */
-	.vendorID	= 0x18d1,
-	.vendorDescr	= "Google, Inc.",
+#ifdef CONFIG_USB_ANDROID
+static struct android_usb_platform_data android_usb_pdata = {
+	.vendor_id	= 0x0bb4,
+	.product_id	= 0x0c01,
+	.adb_product_id	= 0x0c02,
+	.version	= 0x0100,
+	.product_name	= "Android Phone",
+	.manufacturer_name = "HTC",
+	.nluns = 1,
 };
 
-static struct platform_device rndis_device = {
-	.name   = "rndis",
-	.id     = -1,
-	.dev    = {
-		.platform_data = &rndis_pdata,
+static struct platform_device android_usb_device = {
+	.name	= "android_usb",
+	.id		= -1,
+	.dev		= {
+		.platform_data = &android_usb_pdata,
 	},
 };
 #endif
@@ -440,11 +439,11 @@ void __init msm_add_usb_devices(void (*phy_reset) (void), void (*phy_shutdown) (
 
 	msm_device_hsusb.dev.platform_data = &msm_hsusb_pdata;
 	platform_device_register(&msm_device_hsusb);
-#ifdef CONFIG_USB_ANDROID_RNDIS
-	platform_device_register(&rndis_device);
-#endif
 #ifdef CONFIG_USB_FUNCTION_MASS_STORAGE
 	platform_device_register(&usb_mass_storage_device);
+#endif
+#ifdef CONFIG_USB_ANDROID
+	platform_device_register(&android_usb_device);
 #endif
 }
 
@@ -1146,10 +1145,6 @@ EXPORT_SYMBOL(board_mfg_mode);
 
 static int __init board_serialno_setup(char *serialno)
 {
-#ifdef CONFIG_USB_ANDROID_RNDIS
-	int i;
-	char *src;
-#endif
 	char *str;
 
 	/* use default serial number when mode is factory2 */
@@ -1157,19 +1152,11 @@ static int __init board_serialno_setup(char *serialno)
 		str = df_serialno;
 	else
 		str = serialno;
-#ifdef CONFIG_USB_ANDROID_RNDIS
-	/* create a fake MAC address from our serial number.
-	 * first byte is 0x02 to signify locally administered.
-	 */
-	rndis_pdata.ethaddr[0] = 0x02;
-	src = str;
-	for (i = 0; *src; i++) {
-		/* XOR the USB serial across the remaining bytes */
-		rndis_pdata.ethaddr[i % (ETH_ALEN - 1) + 1] ^= *src++;
-	}
-#endif
 #ifdef CONFIG_USB_FUNCTION
 	msm_hsusb_pdata.serial_number = str;
+#endif
+#ifdef CONFIG_USB_ANDROID
+	android_usb_pdata.serial_number = str;
 #endif
 	return 1;
 }
