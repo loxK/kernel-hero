@@ -220,7 +220,7 @@ static void enable_adb(struct android_dev *dev, int enable)
 			device_desc.idProduct =
 				__constant_cpu_to_le16(dev->adb_product_id);
 		else
-			device_desc.iidProduct =
+			device_desc.idProduct =
 				__constant_cpu_to_le16(dev->product_id);
 		if (dev->cdev)
 			dev->cdev->desc.idProduct = device_desc.idProduct;
