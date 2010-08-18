@@ -126,9 +126,16 @@ static struct usb_interface_descriptor rndis_control_intf __initdata = {
 	/* .bInterfaceNumber = DYNAMIC */
 	/* status endpoint is optional; this could be patched later */
 	.bNumEndpoints =	1,
+#ifdef CONFIG_USB_FUNCTION_RNDIS_WCEIS
+	/* "Wireless" RNDIS; auto-detected by Windows */
+	.bInterfaceClass =	USB_CLASS_WIRELESS_CONTROLLER,
+	.bInterfaceSubClass =	1,
+	.bInterfaceProtocol =	3,
+#else
 	.bInterfaceClass =	USB_CLASS_COMM,
 	.bInterfaceSubClass =   USB_CDC_SUBCLASS_ACM,
 	.bInterfaceProtocol =   USB_CDC_ACM_PROTO_VENDOR,
+#endif
 	/* .iInterface = DYNAMIC */
 };
 
@@ -437,7 +444,7 @@ invalid:
 		DBG(cdev, "rndis req%02x.%02x v%04x i%04x l%d\n",
 			ctrl->bRequestType, ctrl->bRequest,
 			w_value, w_index, w_length);
-		req->zero = (value < w_length);
+		req->zero = 0;
 		req->length = value;
 		value = usb_ep_queue(cdev->gadget->ep0, req, GFP_ATOMIC);
 		if (value < 0)
