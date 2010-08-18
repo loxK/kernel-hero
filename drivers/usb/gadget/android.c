@@ -231,7 +231,7 @@ static void enable_adb(struct android_dev *dev, int enable)
 		*/
 		if (!strcmp(f->name, "rndis")) {
 		if (enable)
-#ifdef CONFIG_USB_ANDROID_RNDIS_WCEIS
+#ifdef CONFIG_USB_FUNCTION_RNDIS_WCEIS
 			dev->cdev->desc.bDeviceClass = USB_CLASS_WIRELESS_CONTROLLER;
 #else
 			dev->cdev->desc.bDeviceClass = USB_CLASS_COMM;
