@@ -59,9 +59,16 @@ control_intf = {
 	//.bInterfaceNumber =     0,
 	.bAlternateSetting =	0,
 	.bNumEndpoints =        1,
+#ifdef CONFIG_USB_FUNCTION_RNDIS_WCEIS
+	/* "Wireless" RNDIS; auto-detected by Windows */
+	.bInterfaceClass =	USB_CLASS_WIRELESS_CONTROLLER,
+	.bInterfaceSubClass =	1,
+	.bInterfaceProtocol =	3,
+#else
 	.bInterfaceClass =      USB_CLASS_COMM,
 	.bInterfaceSubClass =   USB_CDC_SUBCLASS_ACM,
 	.bInterfaceProtocol =   USB_CDC_ACM_PROTO_VENDOR,
+#endif
 	.iInterface =           STRING_ES,
 };
 
